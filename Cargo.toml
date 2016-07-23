@@ -1,0 +1,12 @@
+[package]
+name = "rabble"
+version = "0.1.0"
+authors = ["Andrew J. Stone <andrew.j.stone.1@gmail.com>"]
+description = "A library for creating fully connected clusters of nodes"
+repository = "https://github.com/andrewjstone/rabble"
+keywords = ["cluster", "networking", "distributed"]
+license = "Apache-2.0"
+
+[dependencies]
+orset = "0.1"
+rustc-serialize = "0.3"
