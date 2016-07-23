@@ -82,7 +82,7 @@ thread and forwarded onto the client sockets using the correlation id.
 
 ### Caveats
 
-##### Expensive Computation inside processes
+#### Expensive Computation inside processes
 A major design issue of the current architecture is that all processes are run in a single executor
 thread, and processes are executed as soon as an envelope is received that is destined for them.
 This means that there is no scheduling at play and some processes will get more CPU time than
@@ -94,7 +94,7 @@ be better to run those computations in a separate thread and forward the results
 appropriate process in a similar manner to how I/O threads work. If this becomes an issue in real
 software, this capability will be added.
 
-### 100% CPU use on the executor thread
+#### 100% CPU use on the executor thread
 This case is related to the above, but can occur even in scenarios with very lightweight process
 operations. If this occurs while I/O is not saturated and other cores have capacity, it will be
 necessary to turn the executor into multiple executor threads. While a simple thread pool is
@@ -107,14 +107,14 @@ used in such a scenario, they don't have the benefits of simple actors that can 
 messages and return messages to be sent, primarily test-ability.  Additionally, coroutines don't
 play well with the original architecture as they are allowed to perform I/O.
 
-### 100% CPU use on the cluster server thread
+#### 100% CPU use on the cluster server thread
 It's quite possible that serialization, deserialization and packet sending and receiving will reach
 CPU saturation before the executor thread. In this case a thread pool will be necessary. This does
 not have the complexity of process scheduling above since operations are not as fine grained and
 fairness is unlikely to be an issue as packets can only be received in the order they are sent. It's
 also easy to round robin reading and writing X bytes from and to each socket.
 
-### Back Pressure
+#### Back Pressure
 In order to simplify the programming model inside cluster, all channels between threads are rust
 standard non-blocking asynchronous channels. This provides no back pressure whatsoever. However, this
 is not a problem since rust processes can only receive and not generate messages. The only way for a
