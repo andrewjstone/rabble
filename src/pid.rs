@@ -16,6 +16,7 @@ impl Display for Pid {
     fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
         match self.group {
             None => write!(f, "{}::{}::{}", self.name, self.node.name, self.node.addr),
-            Some(g) => write!(f, "{}::{}::{}::{}", g, self.name, self.node.name, self.node.addr)
+            Some(ref g) => write!(f, "{}::{}::{}::{}", g, self.name, self.node.name, self.node.addr)
+        }
     }
 }
