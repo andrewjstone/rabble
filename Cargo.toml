@@ -8,6 +8,20 @@ keywords = ["cluster", "networking", "distributed"]
 license = "Apache-2.0"
 
 [dependencies]
-amy = "0.3"
+amy = "0.6"
 orset = "0.1"
 rustc-serialize = "0.3"
+rmp-serialize = "0.7"
+time = "0.1"
+net2 = "0.2"
+error-chain = "0.5"
+libc = "0.2"
+log = "0.3"
+slog = {version = "1", features = ["max_level_trace"]}
+slog-stdlog = "1"
+slog-term = "1.1"
+slog-envlogger = "0.5"
+ferris = "0.1"
+
+[dev-dependencies]
+assert_matches = "1.0"

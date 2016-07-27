@@ -1,7 +1,7 @@
 # Introduction
 The goal of rabble is to provide a fully connected mesh of nodes that serve to allow location
 independent actor communication ala Erlang. An actor in rabble is known as a process and has a
-single method, `receive`, that receives messages from other actors or system threads. Processes are
+single method, `handle`, that receives messages from other actors or thread based `services`. Processes are
 externally pure in that they are only supposed to modify their internal mutable state and then return
 any outgoing messages from the receive call. While processes should not perform I/O, this is is not
 enforced via the type system as in Haskell, since there isn't a way to do that in Rust. By allowing

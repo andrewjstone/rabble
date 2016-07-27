@@ -1,19 +1,17 @@
 use std::collections::HashSet;
-use std::sync::{Arc, RwLock};
 use std::fmt::{Display, Formatter, Error};
-use orset::ORSet;
-use node::Node;
+use orset::{ORSet, Delta};
+use node_id::NodeId;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq, RustcEncodable, RustcDecodable)]
 pub struct Members {
-    pub me: Node,
-    inner: Arc<RwLock<Inner>>
+    pub me: NodeId,
+    orset: ORSet<NodeId>
 }
 
 impl Display for Members {
     fn fmt(&self, fmt: &mut Formatter) -> Result<(), Error> {
-        let inner = self.inner.read().unwrap();
-        let mut members = inner.orset.elements();
+        let mut members = self.orset.elements();
         members.sort();
         for member in members {
             try!(fmt.write_fmt(format_args!("{} \n", member.name)));
@@ -23,57 +21,40 @@ impl Display for Members {
 }
 
 impl Members {
-    pub fn new(name: String, addr: String) -> Members {
-        let me = Node {
-            name: name.clone(),
-            addr: addr,
-        };
-        let mut orset = ORSet::new(me.to_string());
-        orset.add(me.clone());
+    pub fn new(node: NodeId) -> Members {
+        let mut orset = ORSet::new(node.to_string());
+        orset.add(node.clone());
         Members {
-            me: me,
-            inner: Arc::new(RwLock::new(Inner {
-                orset: orset,
-                connected: HashSet::new()
-            }))
+            me: node,
+            orset: orset
         }
     }
 
-    pub fn status(&self) -> MemberStatus {
-        let inner = self.inner.read().unwrap();
-        let all: HashSet<Node> = inner.orset.elements().iter().filter(|&node| {
-            *node != self.me
-        }).cloned().collect();
-        MemberStatus {
-            connected: inner.connected.clone(),
-            disconnected: all.difference(&inner.connected).cloned().collect()
+    pub fn all(&self) -> HashSet<NodeId> {
+        self.orset.elements().into_iter().collect()
+    }
+
+    pub fn join(&mut self, other: ORSet<NodeId>) {
+        self.orset.join_state(other);
+    }
+
+    /// Returns None if this node has not ever seen an add of the element
+    pub fn leave(&mut self, leaving: NodeId) -> Option<Delta<NodeId>> {
+        if let Some(dots) = self.orset.seen(&leaving) {
+            return Some(self.orset.remove(leaving, dots));
         }
+        None
     }
 
-    pub fn join(&mut self, other: ORSet<Node>) {
-        let mut inner = self.inner.write().unwrap();
-        inner.orset.join_state(other);
+    pub fn join_delta(&mut self, delta: Delta<NodeId>) -> bool {
+        self.orset.join(delta)
     }
 
-    pub fn get_orset(&self) -> ORSet<Node> {
-        let inner = self.inner.write().unwrap();
-        inner.orset.clone()
+    pub fn get_orset(&self) -> ORSet<NodeId> {
+        self.orset.clone()
     }
 
-    pub fn add(&mut self, element: Node) {
-        let mut inner = self.inner.write().unwrap();
-        inner.orset.add(element);
+    pub fn add(&mut self, element: NodeId) -> Delta<NodeId> {
+        self.orset.add(element)
     }
-}
-
-#[derive(Debug, Clone)]
-struct Inner {
-    orset: ORSet<Node>,
-    connected: HashSet<Node>
-}
-
-#[derive(Debug, Clone)]
-pub struct MemberStatus {
-    connected: HashSet<Node>,
-    disconnected: HashSet<Node>
 }
