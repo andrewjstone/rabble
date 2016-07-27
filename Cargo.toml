@@ -11,3 +11,9 @@ license = "Apache-2.0"
 amy = "0.3"
 orset = "0.1"
 rustc-serialize = "0.3"
+rmp-serialize = "0.7"
+time = "0.1"
+net2 = "0.2"
+
+[dev-dependencies]
+assert_matches = "1.0"
