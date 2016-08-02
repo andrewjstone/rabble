@@ -6,8 +6,7 @@ use node::Node;
 #[derive(Debug, Clone)]
 pub struct Members {
     pub me: Node,
-    orset: ORSet<Node>,
-    connected: HashSet<Node>
+    orset: ORSet<Node>
 }
 
 impl Display for Members {
@@ -27,19 +26,12 @@ impl Members {
         orset.add(node.clone());
         Members {
             me: node,
-            orset: orset,
-            connected: HashSet::new()
+            orset: orset
         }
     }
 
-    pub fn status(&self) -> MemberStatus {
-        let all: HashSet<Node> = self.orset.elements().iter().filter(|&node| {
-            *node != self.me
-        }).cloned().collect();
-        MemberStatus {
-            connected: self.connected.clone(),
-            disconnected: all.difference(&self.connected).cloned().collect()
-        }
+    pub fn all(&self) -> HashSet<Node> {
+        self.orset.elements().into_iter().collect()
     }
 
     pub fn join(&mut self, other: ORSet<Node>) {
@@ -53,10 +45,4 @@ impl Members {
     pub fn add(&mut self, element: Node) {
         self.orset.add(element);
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct MemberStatus {
-    connected: HashSet<Node>,
-    disconnected: HashSet<Node>
 }

@@ -11,29 +11,31 @@ use members::Members;
 use node::Node;
 use internal_msg::InternalMsg;
 use external_msg::ExternalMsg;
+use timer_wheel::TimerWheel;
 
 // TODO: This is totally arbitrary right now and should probably be user configurable
 const MAX_FRAME_SIZE: u32 = 100*1024*1024; // 100 MB
 const TICK_TIME: usize = 1000; // milliseconds
+const REQUEST_TIMEOUT: usize = 5000; // milliseconds
 
 struct Conn {
     sock: TcpStream,
-    addr: Option<String>,
+    node: Option<Node>,
     is_client: bool,
+    timer_wheel_index: usize,
     reader: FrameReader,
-    writer: FrameWriter,
-    last_received_time: SteadyTime
+    writer: FrameWriter
 }
 
 impl Conn {
-    pub fn new(sock: TcpStream, addr: Option<String>, is_client: bool) -> Conn {
+    pub fn new(sock: TcpStream, node: Option<Node>, is_client: bool) -> Conn {
         Conn {
             sock: sock,
-            addr: addr,
+            node: node,
             is_client: is_client,
+            timer_wheel_index: 0, // Initialize with a fake value
             reader: FrameReader::new(MAX_FRAME_SIZE),
             writer: FrameWriter::new(),
-            last_received_time: SteadyTime::now()
         }
     }
 }
@@ -44,12 +46,12 @@ pub struct ClusterServer<T: Encodable + Decodable> {
     node: Node,
     rx: Receiver<InternalMsg<T>>,
     timer: Timer,
+    timer_wheel: TimerWheel<usize>,
     listener: TcpListener,
     listener_id: usize,
     members: Members,
     unestablished: HashMap<usize, Conn>,
-    established_by_id: HashMap<usize, Conn>,
-    established_by_addr: HashMap<usize, Conn>,
+    established: HashMap<usize, Conn>,
     registrar: Registrar
 }
 
@@ -63,12 +65,12 @@ impl<T: Encodable + Decodable> ClusterServer<T> {
             node: node.clone(),
             rx: rx,
             timer: dummy_timer,
+            timer_wheel: TimerWheel::new(REQUEST_TIMEOUT / TICK_TIME),
             listener: listener,
             listener_id: 0,
             members: Members::new(node),
             unestablished: HashMap::new(),
-            established_by_addr: HashMap::new(),
-            established_by_id: HashMap::new(),
+            established: HashMap::new(),
             registrar: registrar
         }
     }
@@ -100,22 +102,22 @@ impl<T: Encodable + Decodable> ClusterServer<T> {
     }
 
     fn join(&mut self, node: Node) {
-        let addr = node.addr.clone();
-        self.members.add(node);
-        self.connect(addr);
+        self.members.add(node.clone());
+        self.connect(node);
     }
 
-    fn connect(&mut self, addr: String) {
+    fn connect(&mut self, node: Node) {
         // TODO: Could this ever actually fail?
         let sock = TcpBuilder::new_v4().unwrap().to_tcp_stream().unwrap();
         sock.set_nonblocking(true).unwrap();
-        match sock.connect(&addr[..]) {
+        match sock.connect(&node.addr[..]) {
             Err(ref e) if e.kind() != io::ErrorKind::WouldBlock => {
                 // TODO: Log error
             },
             _ => {
                 if let Ok(id) = self.registrar.register(&sock, Event::Read) {
-                    let conn = Conn::new(sock, Some(addr), true);
+                    let mut conn = Conn::new(sock, Some(node), true);
+                    conn.timer_wheel_index = self.timer_wheel.insert(id);
                     self.unestablished.insert(id, conn);
                 } else {
                     // TODO: Log Error
@@ -134,10 +136,12 @@ impl<T: Encodable + Decodable> ClusterServer<T> {
                 match conn.writer.write(&mut conn.sock, Some(encoded)) {
                     Ok(false) => {
                         if let Ok(_) = self.registrar.reregister(id, &conn.sock, Event::Both) {
+                            conn.timer_wheel_index = self.timer_wheel.insert(id);
                             self.unestablished.insert(id, conn);
                         }
                     },
                     Ok(true) => {
+                        conn.timer_wheel_index = self.timer_wheel.insert(id);
                         self.unestablished.insert(id, conn);
                     },
                     Err(_) => {
@@ -152,6 +156,10 @@ impl<T: Encodable + Decodable> ClusterServer<T> {
     }
 
     fn tick(&mut self) {
+        let expired = self.timer_wheel.expire();
+        self.deregister(expired);
+        self.send_pings();
+        self.check_connections();
     }
 
     fn handle_socket_event(&mut self, notification: Notification) {
@@ -164,4 +172,78 @@ impl<T: Encodable + Decodable> ClusterServer<T> {
         msg.encode(&mut Encoder::new(&mut encoded)).unwrap();
         encoded
     }
+
+    fn deregister(&mut self, expired: HashSet<usize>) {
+        for id in expired.iter() {
+            if let Some(conn) = self.unestablished.remove(id) {
+                self.registrar.deregister(conn.sock);
+                continue;
+            }
+
+            if let Some(conn) = self.established.remove(id) {
+                self.registrar.deregister(conn.sock);
+            }
+        }
+    }
+
+    fn send_pings(&mut self) {
+        let mut encoded = Vec::new();
+        let msg = ExternalMsg::Ping::<T>;
+        msg.encode(&mut Encoder::new(&mut encoded)).unwrap();
+        for id in self.write_encoded(encoded) {
+            self.established.remove(&id);
+        }
+    }
+
+    // Write encoded values to a connection and return the id of any connections with errors
+    fn write_encoded(&mut self, encoded: Vec<u8>) -> Vec<usize> {
+        let mut err_ids = Vec::new();
+        for (id, conn) in self.established.iter_mut() {
+            match conn.writer.write(&mut conn.sock, Some(encoded.clone())) {
+                Ok(false) => {
+                    if let Err(e) = self.registrar.reregister(*id, &conn.sock, Event::Both) {
+                        self.timer_wheel.remove(id, conn.timer_wheel_index);
+                        err_ids.push(*id);
+                        // TODO: Log error
+                    }
+                },
+                Ok(true) => (),
+                Err(e) => {
+                    self.timer_wheel.remove(id, conn.timer_wheel_index);
+                    err_ids.push(*id);
+                    // TODO: Log error
+                }
+            }
+        }
+        err_ids
+    }
+
+    // Ensure connections are correct based on membership state
+    fn check_connections(&mut self) {
+        let all = self.members.all();
+        let connected: HashSet<Node> = self.established.iter().map(|(_, conn)| {
+            conn.node.as_ref().unwrap().clone()
+        }).collect();
+        let to_connect: Vec<Node> = all.difference(&connected)
+                                       .filter(|&node| *node != self.node).cloned().collect();
+        let to_disconnect: Vec<Node> = connected.difference(&all).cloned().collect();
+
+        for node in to_connect {
+            self.connect(node);
+        }
+
+        self.disconnect_established(to_disconnect);
+    }
+
+   fn disconnect_established(&mut self, to_disconnect: Vec<Node>) {
+       let ids: Vec<usize> = self.established.iter().filter(|&(ref id, ref conn)| {
+           to_disconnect.contains(conn.node.as_ref().unwrap())
+       }).map(|(id, _)| *id).collect();
+
+       for id in ids {
+           let conn = self.established.remove(&id).unwrap();
+           self.timer_wheel.remove(&id, conn.timer_wheel_index);
+           self.registrar.deregister(conn.sock);
+       }
+   }
 }

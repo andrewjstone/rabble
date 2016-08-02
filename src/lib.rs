@@ -15,6 +15,7 @@ mod internal_msg;
 mod external_msg;
 mod poller;
 mod cluster_server;
+mod timer_wheel;
 
 pub use node::Node;
 pub use pid::Pid;
