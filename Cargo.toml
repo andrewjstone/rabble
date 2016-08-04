@@ -8,7 +8,7 @@ keywords = ["cluster", "networking", "distributed"]
 license = "Apache-2.0"
 
 [dependencies]
-amy = "0.3"
+amy = "0.4"
 orset = "0.1"
 rustc-serialize = "0.3"
 rmp-serialize = "0.7"

@@ -1,3 +1,4 @@
+use rustc_serialize::{Encodable, Decodable};
 use std::sync::mpsc::{Sender, Receiver};
 use std::collections::HashMap;
 use envelope::Envelope;
@@ -5,7 +6,7 @@ use pid::Pid;
 use process::Process;
 use node::Node;
 
-pub struct Executor<T, P> where P: Process<T> {
+pub struct Executor<T, P> where P: Process<T>, T: Encodable + Decodable {
     node: Node,
     processes: HashMap<Pid, P>,
     tx: Sender<Envelope<T>>,
@@ -13,7 +14,7 @@ pub struct Executor<T, P> where P: Process<T> {
     cluster_tx: Sender<Envelope<T>>
 }
 
-impl<T, P> Executor<T, P> where P: Process<T> {
+impl<T, P> Executor<T, P> where P: Process<T>, T: Encodable + Decodable {
     pub fn new(node: Node,
                tx: Sender<Envelope<T>>,
                rx: Receiver<Envelope<T>>,

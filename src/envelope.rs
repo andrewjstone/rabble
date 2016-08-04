@@ -1,6 +1,8 @@
+use rustc_serialize::{Encodable, Decodable};
 use pid::Pid;
 
-pub struct Envelope<T> {
+#[derive(Debug, Clone, Eq, PartialEq, RustcEncodable, RustcDecodable)]
+pub struct Envelope<T: Encodable + Decodable> {
     pub to: Pid,
     pub from: Pid,
     pub msg: T
