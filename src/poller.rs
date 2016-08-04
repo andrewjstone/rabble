@@ -3,7 +3,6 @@ use rustc_serialize::{Encodable, Decodable};
 use amy::{Poller, Notification};
 use internal_msg::InternalMsg;
 
-
 const TIMEOUT: usize = 5000; // ms
 
 /// Infinitely poll for and send messages to the cluster server

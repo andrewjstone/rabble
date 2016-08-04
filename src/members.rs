@@ -1,12 +1,12 @@
 use std::collections::HashSet;
 use std::fmt::{Display, Formatter, Error};
 use orset::ORSet;
-use node::Node;
+use node_id::NodeId;
 
 #[derive(Debug, Clone)]
 pub struct Members {
-    pub me: Node,
-    orset: ORSet<Node>
+    pub me: NodeId,
+    orset: ORSet<NodeId>
 }
 
 impl Display for Members {
@@ -21,7 +21,7 @@ impl Display for Members {
 }
 
 impl Members {
-    pub fn new(node: Node) -> Members {
+    pub fn new(node: NodeId) -> Members {
         let mut orset = ORSet::new(node.to_string());
         orset.add(node.clone());
         Members {
@@ -30,19 +30,19 @@ impl Members {
         }
     }
 
-    pub fn all(&self) -> HashSet<Node> {
+    pub fn all(&self) -> HashSet<NodeId> {
         self.orset.elements().into_iter().collect()
     }
 
-    pub fn join(&mut self, other: ORSet<Node>) {
+    pub fn join(&mut self, other: ORSet<NodeId>) {
         self.orset.join_state(other);
     }
 
-    pub fn get_orset(&self) -> ORSet<Node> {
+    pub fn get_orset(&self) -> ORSet<NodeId> {
         self.orset.clone()
     }
 
-    pub fn add(&mut self, element: Node) {
+    pub fn add(&mut self, element: NodeId) {
         self.orset.add(element);
     }
 }

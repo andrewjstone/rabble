@@ -1,5 +1,5 @@
 use rustc_serialize::{Encodable, Decodable};
-use node::Node;
+use node_id::NodeId;
 use orset::ORSet;
 use envelope::Envelope;
 
@@ -7,7 +7,7 @@ use envelope::Envelope;
 ///
 #[derive(Debug, Clone, Eq, PartialEq, RustcEncodable, RustcDecodable)]
 pub enum ExternalMsg<T: Encodable + Decodable> {
-   Members {from: Node, orset: ORSet<Node>},
+   Members {from: NodeId, orset: ORSet<NodeId>},
    Ping,
    User(Envelope<T>)
 }

@@ -1,5 +1,5 @@
 use std::fmt::{Display, Error, Formatter};
-use node::Node;
+use node_id::NodeId;
 
 /// A globally unique process id
 ///
@@ -9,7 +9,7 @@ use node::Node;
 pub struct Pid {
     pub group: Option<String>,
     pub name: String,
-    pub node: Node,
+    pub node: NodeId,
 }
 
 impl Display for Pid {

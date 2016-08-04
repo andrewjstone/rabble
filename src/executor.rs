@@ -4,10 +4,10 @@ use std::collections::HashMap;
 use envelope::Envelope;
 use pid::Pid;
 use process::Process;
-use node::Node;
+use node_id::NodeId;
 
 pub struct Executor<T, P> where P: Process<T>, T: Encodable + Decodable {
-    node: Node,
+    node: NodeId,
     processes: HashMap<Pid, P>,
     tx: Sender<Envelope<T>>,
     rx: Receiver<Envelope<T>>,
@@ -15,7 +15,7 @@ pub struct Executor<T, P> where P: Process<T>, T: Encodable + Decodable {
 }
 
 impl<T, P> Executor<T, P> where P: Process<T>, T: Encodable + Decodable {
-    pub fn new(node: Node,
+    pub fn new(node: NodeId,
                tx: Sender<Envelope<T>>,
                rx: Receiver<Envelope<T>>,
                cluster_tx: Sender<Envelope<T>>) -> Executor<T, P> {

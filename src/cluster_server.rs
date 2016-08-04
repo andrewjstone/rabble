@@ -8,7 +8,7 @@ use rustc_serialize::{Encodable, Decodable};
 use msgpack::{Encoder, Decoder};
 use amy::{Registrar, Notification, Event, Timer, FrameReader, FrameWriter};
 use members::Members;
-use node::Node;
+use node_id::NodeId;
 use internal_msg::InternalMsg;
 use external_msg::ExternalMsg;
 use timer_wheel::TimerWheel;
@@ -22,7 +22,7 @@ const REQUEST_TIMEOUT: usize = 5000; // milliseconds
 
 struct Conn {
     sock: TcpStream,
-    node: Option<Node>,
+    node: Option<NodeId>,
     is_client: bool,
     timer_wheel_index: usize,
     reader: FrameReader,
@@ -30,7 +30,7 @@ struct Conn {
 }
 
 impl Conn {
-    pub fn new(sock: TcpStream, node: Option<Node>, is_client: bool) -> Conn {
+    pub fn new(sock: TcpStream, node: Option<NodeId>, is_client: bool) -> Conn {
         Conn {
             sock: sock,
             node: node,
@@ -45,7 +45,7 @@ impl Conn {
 /// A struct that handles cluster membership connection and routing of messages to processes on
 /// other nodes.
 pub struct ClusterServer<T: Encodable + Decodable> {
-    node: Node,
+    node: NodeId,
     rx: Receiver<InternalMsg<T>>,
     executor_tx: Sender<Envelope<T>>,
     timer: Timer,
@@ -54,12 +54,12 @@ pub struct ClusterServer<T: Encodable + Decodable> {
     listener_id: usize,
     members: Members,
     connections: HashMap<usize, Conn>,
-    established: HashMap<Node, usize>,
+    established: HashMap<NodeId, usize>,
     registrar: Registrar
 }
 
 impl<T: Encodable + Decodable> ClusterServer<T> {
-    pub fn new(node: Node,
+    pub fn new(node: NodeId,
                rx: Receiver<InternalMsg<T>>,
                executor_tx: Sender<Envelope<T>>,
                registrar: Registrar) -> ClusterServer<T> {
@@ -171,7 +171,7 @@ impl<T: Encodable + Decodable> ClusterServer<T> {
 
     /// Transition a connection from unestablished to established. If there is already an
     /// established connection between these two nodes, determine which one should be closed.
-    fn establish_connection(&mut self, id: usize, from: Node, orset: ORSet<Node>) {
+    fn establish_connection(&mut self, id: usize, from: NodeId, orset: ORSet<NodeId>) {
         self.members.join(orset);
         if let Some(close_id) = self.choose_connection_to_close(id, &from) {
             self.close(close_id);
@@ -191,7 +191,7 @@ impl<T: Encodable + Decodable> ClusterServer<T> {
     /// comes from a node that sorts less than the node of the server side of the connection.
     /// Return the id to remove if there is an existing connection to remove, otherwise return
     /// `None` indicating that there isn't an existing connection, so don't close the new one.
-    fn choose_connection_to_close(&self, id: usize, other_node: &Node) -> Option<usize> {
+    fn choose_connection_to_close(&self, id: usize, other_node: &NodeId) -> Option<usize> {
         if let Some(other_id) = self.established.get(other_node) {
             if let Some(other_conn) = self.connections.get(&other_id) {
                 // This node was the client side and sorts lower or it was the server side and sorts
@@ -222,12 +222,12 @@ impl<T: Encodable + Decodable> ClusterServer<T> {
         Ok(output)
     }
 
-    fn join(&mut self, node: Node) {
+    fn join(&mut self, node: NodeId) {
         self.members.add(node.clone());
         self.connect(node);
     }
 
-    fn connect(&mut self, node: Node) {
+    fn connect(&mut self, node: NodeId) {
         // TODO: Could this ever actually fail?
         let sock = TcpBuilder::new_v4().unwrap().to_tcp_stream().unwrap();
         sock.set_nonblocking(true).unwrap();
@@ -343,10 +343,10 @@ impl<T: Encodable + Decodable> ClusterServer<T> {
     // Ensure connections are correct based on membership state
     fn check_connections(&mut self) {
         let all = self.members.all();
-        let connected: HashSet<Node> = self.established.keys().cloned().collect();
-        let to_connect: Vec<Node> = all.difference(&connected)
+        let connected: HashSet<NodeId> = self.established.keys().cloned().collect();
+        let to_connect: Vec<NodeId> = all.difference(&connected)
                                        .filter(|&node| *node != self.node).cloned().collect();
-        let to_disconnect: Vec<Node> = connected.difference(&all).cloned().collect();
+        let to_disconnect: Vec<NodeId> = connected.difference(&all).cloned().collect();
 
         for node in to_connect {
             self.connect(node);
@@ -355,7 +355,7 @@ impl<T: Encodable + Decodable> ClusterServer<T> {
         self.disconnect_established(to_disconnect);
     }
 
-   fn disconnect_established(&mut self, to_disconnect: Vec<Node>) {
+   fn disconnect_established(&mut self, to_disconnect: Vec<NodeId>) {
        for node in to_disconnect {
            if let Some(id) = self.established.remove(&node) {
                let conn = self.connections.remove(&id).unwrap();

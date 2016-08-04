@@ -1,6 +1,6 @@
 use rustc_serialize::{Encodable, Decodable};
 use amy::Notification;
-use node::Node;
+use node_id::NodeId;
 use envelope::Envelope;
 
 /// The top-level type of messages sent over channels in Rabble.
@@ -10,6 +10,6 @@ use envelope::Envelope;
 /// between nodes.
 pub enum InternalMsg<T: Encodable + Decodable> {
     PollNotifications(Vec<Notification>),
-    Join(Node),
+    Join(NodeId),
     User(Envelope<T>)
 }
