@@ -90,12 +90,19 @@ impl<T: Encodable + Decodable> ClusterServer<T> {
                 InternalMsg::PollNotifications(notifications) =>
                     self.handle_poll_notifications(notifications),
                 InternalMsg::Join(node) => self.join(node),
-                InternalMsg::User(user_msg) => self.handle_user_msg(user_msg)
+                InternalMsg::User(envelope) => self.send_remote(envelope)
             }
         }
     }
 
-    fn handle_user_msg(&mut self, msg: T) {
+    fn send_remote(&mut self, envelope: Envelope<T>) {
+        if let Some(id) = self.established.get(&envelope.to.node).cloned() {
+            let mut encoded = Vec::new();
+            ExternalMsg::User(envelope).encode(&mut Encoder::new(&mut encoded)).unwrap();
+            if let Err(e) = self.write(id, Some(encoded)) {
+                self.close(id);
+            }
+        }
     }
 
     fn handle_poll_notifications(&mut self, notifications: Vec<Notification>) {
@@ -119,10 +126,10 @@ impl<T: Encodable + Decodable> ClusterServer<T> {
     fn do_socket_io(&mut self, notification: Notification) -> io::Result<()> {
         match notification.event {
             Event::Read => self.read(notification.id),
-            Event::Write => self.write(notification.id),
+            Event::Write => self.write(notification.id, None),
             Event::Both => {
                 try!(self.read(notification.id));
-                self.write(notification.id)
+                self.write(notification.id, None)
             }
         }
     }
@@ -143,9 +150,9 @@ impl<T: Encodable + Decodable> ClusterServer<T> {
         Ok(())
     }
 
-    fn write(&mut self, id: usize) -> io::Result<()> {
+    fn write(&mut self, id: usize, msg: Option<Vec<u8>>) -> io::Result<()> {
         if let Some(conn) = self.connections.get_mut(&id) {
-            match conn.writer.write(&mut conn.sock, None) {
+            match conn.writer.write(&mut conn.sock, msg) {
                 Ok(false) => self.registrar.reregister(id, &conn.sock, Event::Both),
                 Ok(true) => Ok(()),
                 Err(e) => Err(e)
@@ -274,7 +281,7 @@ impl<T: Encodable + Decodable> ClusterServer<T> {
     fn tick(&mut self) {
         let expired = self.timer_wheel.expire();
         self.deregister(expired);
-        self.send_pings();
+        self.broadcast_pings();
         self.check_connections();
     }
 
@@ -303,7 +310,7 @@ impl<T: Encodable + Decodable> ClusterServer<T> {
         }
     }
 
-    fn send_pings(&mut self) {
+    fn broadcast_pings(&mut self) {
         let mut encoded = Vec::new();
         let msg = ExternalMsg::Ping::<T>;
         msg.encode(&mut Encoder::new(&mut encoded)).unwrap();
