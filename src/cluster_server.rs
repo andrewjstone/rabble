@@ -9,7 +9,8 @@ use msgpack::{Encoder, Decoder};
 use amy::{Registrar, Notification, Event, Timer, FrameReader, FrameWriter};
 use members::Members;
 use node_id::NodeId;
-use internal_msg::InternalMsg;
+use cluster_msg::ClusterMsg;
+use executor_msg::ExecutorMsg;
 use external_msg::ExternalMsg;
 use timer_wheel::TimerWheel;
 use envelope::Envelope;
@@ -46,8 +47,8 @@ impl Conn {
 /// other nodes.
 pub struct ClusterServer<T: Encodable + Decodable> {
     node: NodeId,
-    rx: Receiver<InternalMsg<T>>,
-    executor_tx: Sender<Envelope<T>>,
+    rx: Receiver<ClusterMsg<T>>,
+    executor_tx: Sender<ExecutorMsg<T>>,
     timer: Timer,
     timer_wheel: TimerWheel<usize>,
     listener: TcpListener,
@@ -60,8 +61,8 @@ pub struct ClusterServer<T: Encodable + Decodable> {
 
 impl<T: Encodable + Decodable> ClusterServer<T> {
     pub fn new(node: NodeId,
-               rx: Receiver<InternalMsg<T>>,
-               executor_tx: Sender<Envelope<T>>,
+               rx: Receiver<ClusterMsg<T>>,
+               executor_tx: Sender<ExecutorMsg<T>>,
                registrar: Registrar) -> ClusterServer<T> {
         // We don't want to actually start polling yet, so create a dummy timer.
         let dummy_timer = Timer {id: 0, fd: 0};
@@ -87,10 +88,10 @@ impl<T: Encodable + Decodable> ClusterServer<T> {
         self.listener_id = self.registrar.register(&self.listener, Event::Read).unwrap();
         while let Ok(msg) = self.rx.recv() {
             match msg {
-                InternalMsg::PollNotifications(notifications) =>
+                ClusterMsg::PollNotifications(notifications) =>
                     self.handle_poll_notifications(notifications),
-                InternalMsg::Join(node) => self.join(node),
-                InternalMsg::User(envelope) => self.send_remote(envelope)
+                ClusterMsg::Join(node) => self.join(node),
+                ClusterMsg::User(envelope) => self.send_remote(envelope)
             }
         }
     }
@@ -144,7 +145,8 @@ impl<T: Encodable + Decodable> ClusterServer<T> {
                     self.check_connections();
                 },
                 ExternalMsg::Ping => self.reset_timer(id),
-                ExternalMsg::User(envelope) => self.executor_tx.send(envelope).unwrap()
+                ExternalMsg::User(envelope) =>
+                    self.executor_tx.send(ExecutorMsg::User(envelope)).unwrap()
             }
         }
         Ok(())

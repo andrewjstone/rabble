@@ -8,7 +8,7 @@ use envelope::Envelope;
 /// This message must contain both rabble internal data types and a user defined data type.
 /// Note that the user defined data type must be Encodable and Decodable because it can be sent
 /// between nodes.
-pub enum InternalMsg<T: Encodable + Decodable> {
+pub enum ClusterMsg<T: Encodable + Decodable> {
     PollNotifications(Vec<Notification>),
     Join(NodeId),
     User(Envelope<T>)
