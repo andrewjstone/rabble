@@ -17,6 +17,9 @@ mod cluster_msg;
 mod external_msg;
 mod cluster_server;
 mod timer_wheel;
+mod executor_status;
+mod cluster_status;
+mod system_msg;
 
 pub use node_id::NodeId;
 pub use node::Node;
@@ -34,10 +37,11 @@ use executor::Executor;
 
 const TIMEOUT: usize = 5000; // ms
 
-/// Start a node in the rabble cluster and return it
+/// Start a node in the rabble cluster and return it along with the handles to all threads started
+/// by rabble.
 ///
 /// All nodes in a cluster must be parameterized by the same type.
-pub fn rouse<T>(node_id: NodeId) -> (Node<T>, Vec<JoinHandle<()>>)
+pub fn rouse<T, U: Send + 'static>(node_id: NodeId) -> (Node<T, U>, Vec<JoinHandle<()>>)
   where T: Encodable + Decodable + Send + 'static {
     let mut poller = Poller::new().unwrap();
     let (exec_tx, exec_rx) = channel();

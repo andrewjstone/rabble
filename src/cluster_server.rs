@@ -3,7 +3,6 @@ use std::collections::{HashMap, HashSet};
 use std::net::{TcpListener, TcpStream};
 use std::io::{self, Error, ErrorKind};
 use net2::{TcpBuilder, TcpStreamExt};
-use time::{SteadyTime, Duration};
 use rustc_serialize::{Encodable, Decodable};
 use msgpack::{Encoder, Decoder};
 use amy::{Registrar, Notification, Event, Timer, FrameReader, FrameWriter};
@@ -13,8 +12,11 @@ use cluster_msg::ClusterMsg;
 use executor_msg::ExecutorMsg;
 use external_msg::ExternalMsg;
 use timer_wheel::TimerWheel;
-use envelope::Envelope;
+use envelope::{Envelope, ProcessEnvelope, SystemEnvelope};
 use orset::ORSet;
+use pid::Pid;
+use system_msg::SystemMsg;
+use cluster_status::ClusterStatus;
 
 // TODO: This is totally arbitrary right now and should probably be user configurable
 const MAX_FRAME_SIZE: u32 = 100*1024*1024; // 100 MB
@@ -45,10 +47,11 @@ impl Conn {
 
 /// A struct that handles cluster membership connection and routing of messages to processes on
 /// other nodes.
-pub struct ClusterServer<T: Encodable + Decodable> {
+pub struct ClusterServer<T: Encodable + Decodable, U> {
+    pid: Pid,
     node: NodeId,
     rx: Receiver<ClusterMsg<T>>,
-    executor_tx: Sender<ExecutorMsg<T>>,
+    executor_tx: Sender<ExecutorMsg<T, U>>,
     timer: Timer,
     timer_wheel: TimerWheel<usize>,
     listener: TcpListener,
@@ -59,16 +62,22 @@ pub struct ClusterServer<T: Encodable + Decodable> {
     registrar: Registrar
 }
 
-impl<T: Encodable + Decodable> ClusterServer<T> {
+impl<T: Encodable + Decodable, U> ClusterServer<T, U> {
     pub fn new(node: NodeId,
                rx: Receiver<ClusterMsg<T>>,
-               executor_tx: Sender<ExecutorMsg<T>>,
-               registrar: Registrar) -> ClusterServer<T> {
+               executor_tx: Sender<ExecutorMsg<T, U>>,
+               registrar: Registrar) -> ClusterServer<T, U> {
+        let pid = Pid {
+            group: Some("rabble".to_string()),
+            name: "ClusterServer".to_string(),
+            node: node.clone()
+        };
         // We don't want to actually start polling yet, so create a dummy timer.
         let dummy_timer = Timer {id: 0, fd: 0};
         let listener = TcpListener::bind(&node.addr[..]).unwrap();
         listener.set_nonblocking(true).unwrap();
         ClusterServer {
+            pid: pid,
             node: node.clone(),
             rx: rx,
             executor_tx: executor_tx,
@@ -91,12 +100,29 @@ impl<T: Encodable + Decodable> ClusterServer<T> {
                 ClusterMsg::PollNotifications(notifications) =>
                     self.handle_poll_notifications(notifications),
                 ClusterMsg::Join(node) => self.join(node),
-                ClusterMsg::User(envelope) => self.send_remote(envelope)
+                ClusterMsg::User(envelope) => self.send_remote(envelope),
+                ClusterMsg::GetStatus(pid, correlation_id) => self.get_status(pid, correlation_id)
             }
         }
     }
 
-    fn send_remote(&mut self, envelope: Envelope<T>) {
+    fn get_status(&self, pid: Pid, correlation_id: usize) {
+        let status = ClusterStatus {
+            correlation_id: correlation_id,
+            members: self.members.clone(),
+            connected: self.established.keys().cloned().collect()
+        };
+        let system_envelope = SystemEnvelope {
+            to: pid,
+            from: self.pid.clone(),
+            msg: SystemMsg::ClusterStatus(status)
+        };
+        // Route the response through the executor since it knows how to contact all Pids
+        let envelope = Envelope::System(system_envelope);
+        self.executor_tx.send(ExecutorMsg::User(envelope)).unwrap();
+    }
+
+    fn send_remote(&mut self, envelope: ProcessEnvelope<T>) {
         if let Some(id) = self.established.get(&envelope.to.node).cloned() {
             let mut encoded = Vec::new();
             ExternalMsg::User(envelope).encode(&mut Encoder::new(&mut encoded)).unwrap();
@@ -145,8 +171,10 @@ impl<T: Encodable + Decodable> ClusterServer<T> {
                     self.check_connections();
                 },
                 ExternalMsg::Ping => self.reset_timer(id),
-                ExternalMsg::User(envelope) =>
-                    self.executor_tx.send(ExecutorMsg::User(envelope)).unwrap()
+                ExternalMsg::User(process_envelope) => {
+                    let envelope = Envelope::Process(process_envelope);
+                    self.executor_tx.send(ExecutorMsg::User(envelope)).unwrap();
+                }
             }
         }
         Ok(())
@@ -270,7 +298,7 @@ impl<T: Encodable + Decodable> ClusterServer<T> {
                         self.connections.insert(id, conn);
                     },
                     Err(_) => {
-                        self.registrar.deregister(conn.sock);
+                        let _ = self.registrar.deregister(conn.sock);
                     }
 
                 }
@@ -304,7 +332,7 @@ impl<T: Encodable + Decodable> ClusterServer<T> {
     /// Close an existing connection and remove all related state.
     fn close(&mut self, id: usize) {
         if let Some(conn) = self.connections.remove(&id) {
-            self.registrar.deregister(conn.sock);
+            let _ = self.registrar.deregister(conn.sock);
             self.timer_wheel.remove(&id, conn.timer_wheel_index);
             if let Some(node) = conn.node {
                 self.established.remove(&node);
@@ -362,7 +390,7 @@ impl<T: Encodable + Decodable> ClusterServer<T> {
            if let Some(id) = self.established.remove(&node) {
                let conn = self.connections.remove(&id).unwrap();
                self.timer_wheel.remove(&id, conn.timer_wheel_index);
-               self.registrar.deregister(conn.sock);
+               let _ = self.registrar.deregister(conn.sock);
            }
        }
    }

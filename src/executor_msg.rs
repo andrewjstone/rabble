@@ -1,11 +1,15 @@
+use std::sync::mpsc::Sender;
 use rustc_serialize::{Encodable, Decodable};
-use node_id::NodeId;
-use envelope::Envelope;
+use envelope::{Envelope, SystemEnvelope};
 use process::Process;
 use pid::Pid;
 
-pub enum ExecutorMsg<T: Encodable + Decodable> {
-    Start(Pid, Box<Process<T>>),
+pub type CorrelationId = usize;
+
+pub enum ExecutorMsg<T: Encodable + Decodable, U> {
+    Start(Pid, Box<Process<T, U>>),
     Stop(Pid),
-    User(Envelope<T>)
+    User(Envelope<T, U>),
+    RegisterSystemThread(Pid, Sender<SystemEnvelope<U>>),
+    GetStatus(Pid, CorrelationId)
 }

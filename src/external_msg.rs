@@ -1,7 +1,7 @@
 use rustc_serialize::{Encodable, Decodable};
 use node_id::NodeId;
 use orset::ORSet;
-use envelope::Envelope;
+use envelope::ProcessEnvelope;
 
 /// A message sent between nodes in Rabble.
 ///
@@ -9,5 +9,5 @@ use envelope::Envelope;
 pub enum ExternalMsg<T: Encodable + Decodable> {
    Members {from: NodeId, orset: ORSet<NodeId>},
    Ping,
-   User(Envelope<T>)
+   User(ProcessEnvelope<T>)
 }
