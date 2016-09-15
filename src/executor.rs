@@ -1,4 +1,5 @@
 use rustc_serialize::{Encodable, Decodable};
+use std::fmt::Debug;
 use std::sync::mpsc::{Sender, Receiver};
 use std::collections::HashMap;
 use envelope::{Envelope, SystemEnvelope, ProcessEnvelope};
@@ -10,18 +11,19 @@ use cluster_msg::ClusterMsg;
 use executor_status::ExecutorStatus;
 use system_msg::SystemMsg;
 use correlation_id::CorrelationId;
+use amy;
 
-pub struct Executor<T: Encodable + Decodable + Send, U> {
+pub struct Executor<T: Encodable + Decodable + Send, U: Debug> {
     pid: Pid,
     node: NodeId,
     processes: HashMap<Pid, Box<Process<T, U>>>,
-    system_senders: HashMap<Pid, Sender<SystemEnvelope<U>>>,
+    system_senders: HashMap<Pid, amy::Sender<SystemEnvelope<U>>>,
     tx: Sender<ExecutorMsg<T, U>>,
     rx: Receiver<ExecutorMsg<T, U>>,
     cluster_tx: Sender<ClusterMsg<T>>
 }
 
-impl<T: Encodable + Decodable + Send, U> Executor<T, U> {
+impl<T: Encodable + Decodable + Send, U: Debug> Executor<T, U> {
     pub fn new(node: NodeId,
                tx: Sender<ExecutorMsg<T, U>>,
                rx: Receiver<ExecutorMsg<T, U>>,

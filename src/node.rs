@@ -1,4 +1,5 @@
 use std::sync::mpsc::Sender;
+use std::fmt::Debug;
 use rustc_serialize::{Encodable, Decodable};
 use node_id::NodeId;
 use executor_msg::ExecutorMsg;
@@ -7,13 +8,13 @@ use service::Service;
 use pid::Pid;
 
 #[derive(Clone)]
-pub struct Node<T: Encodable + Decodable, U> {
+pub struct Node<T: Encodable + Decodable, U: Debug + Clone> {
     pub id: NodeId,
     executor_tx: Sender<ExecutorMsg<T, U>>,
     cluster_tx: Sender<ClusterMsg<T>>
 }
 
-impl<T: Encodable + Decodable, U> Node<T, U> {
+impl<T: Encodable + Decodable, U: Debug + Clone> Node<T, U> {
     pub fn new(id: NodeId,
                executor_tx: Sender<ExecutorMsg<T, U>>,
                cluster_tx: Sender<ClusterMsg<T>>) -> Node<T, U> {

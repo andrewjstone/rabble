@@ -11,6 +11,7 @@ use correlation_id::CorrelationId;
 /// Some examples of system threads are admin and client servers that require replies from
 /// processes, that can then be returned to the user. File management threads are also system
 /// processes.
+#[derive(Debug, Clone)]
 pub struct SystemEnvelope<T> {
     pub to: Pid,
     pub from: Pid,

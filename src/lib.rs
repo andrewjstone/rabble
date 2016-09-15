@@ -23,6 +23,7 @@ mod system_msg;
 mod service;
 mod handler;
 mod correlation_id;
+mod system_envelope_handler;
 
 pub use node_id::NodeId;
 pub use node::Node;
@@ -32,6 +33,7 @@ pub use envelope::Envelope;
 
 use std::thread::{self, JoinHandle};
 use std::sync::mpsc::channel;
+use std::fmt::Debug;
 use rustc_serialize::{Encodable, Decodable};
 use amy::Poller;
 use cluster_msg::ClusterMsg;
@@ -44,8 +46,9 @@ const TIMEOUT: usize = 5000; // ms
 /// by rabble.
 ///
 /// All nodes in a cluster must be parameterized by the same type.
-pub fn rouse<T, U: Send + 'static>(node_id: NodeId) -> (Node<T, U>, Vec<JoinHandle<()>>)
-  where T: Encodable + Decodable + Send + 'static {
+pub fn rouse<T, U>(node_id: NodeId) -> (Node<T, U>, Vec<JoinHandle<()>>)
+  where T: Encodable + Decodable + Send + 'static,
+        U: Debug + Clone + Send + 'static {
     let mut poller = Poller::new().unwrap();
     let (exec_tx, exec_rx) = channel();
     let (cluster_tx, cluster_rx) = channel();
