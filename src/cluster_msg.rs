@@ -3,8 +3,7 @@ use amy::Notification;
 use node_id::NodeId;
 use envelope::ProcessEnvelope;
 use pid::Pid;
-
-pub type CorrelationId = usize;
+use correlation_id::CorrelationId;
 
 /// Messages sent to the Cluster Server
 pub enum ClusterMsg<T: Encodable + Decodable> {

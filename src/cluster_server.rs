@@ -17,6 +17,7 @@ use orset::ORSet;
 use pid::Pid;
 use system_msg::SystemMsg;
 use cluster_status::ClusterStatus;
+use correlation_id::CorrelationId;
 
 // TODO: This is totally arbitrary right now and should probably be user configurable
 const MAX_FRAME_SIZE: u32 = 100*1024*1024; // 100 MB
@@ -106,16 +107,16 @@ impl<T: Encodable + Decodable, U> ClusterServer<T, U> {
         }
     }
 
-    fn get_status(&self, pid: Pid, correlation_id: usize) {
+    fn get_status(&self, pid: Pid, correlation_id: CorrelationId) {
         let status = ClusterStatus {
-            correlation_id: correlation_id,
             members: self.members.clone(),
             connected: self.established.keys().cloned().collect()
         };
         let system_envelope = SystemEnvelope {
             to: pid,
             from: self.pid.clone(),
-            msg: SystemMsg::ClusterStatus(status)
+            msg: SystemMsg::ClusterStatus(status),
+            correlation_id: Some(correlation_id)
         };
         // Route the response through the executor since it knows how to contact all Pids
         let envelope = Envelope::System(system_envelope);

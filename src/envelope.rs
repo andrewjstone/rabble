@@ -1,6 +1,7 @@
 use rustc_serialize::{Encodable, Decodable};
 use pid::Pid;
 use system_msg::SystemMsg;
+use correlation_id::CorrelationId;
 
 /// Envelopes routable to threads running on the same node as a process.
 ///
@@ -13,7 +14,8 @@ use system_msg::SystemMsg;
 pub struct SystemEnvelope<T> {
     pub to: Pid,
     pub from: Pid,
-    pub msg: SystemMsg<T>
+    pub msg: SystemMsg<T>,
+    pub correlation_id: Option<CorrelationId>
 }
 
 /// Envelopes sent to lightweight processes.
@@ -27,7 +29,8 @@ pub struct SystemEnvelope<T> {
 pub struct ProcessEnvelope<T: Encodable + Decodable> {
     pub to: Pid,
     pub from: Pid,
-    pub msg: T
+    pub msg: T,
+    pub correlation_id: Option<CorrelationId>
 }
 
 pub enum Envelope<T: Encodable + Decodable, U> {

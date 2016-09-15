@@ -20,6 +20,9 @@ mod timer_wheel;
 mod executor_status;
 mod cluster_status;
 mod system_msg;
+mod service;
+mod handler;
+mod correlation_id;
 
 pub use node_id::NodeId;
 pub use node::Node;

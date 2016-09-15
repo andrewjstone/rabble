@@ -9,6 +9,7 @@ use executor_msg::ExecutorMsg;
 use cluster_msg::ClusterMsg;
 use executor_status::ExecutorStatus;
 use system_msg::SystemMsg;
+use correlation_id::CorrelationId;
 
 pub struct Executor<T: Encodable + Decodable + Send, U> {
     pid: Pid,
@@ -59,16 +60,16 @@ impl<T: Encodable + Decodable + Send, U> Executor<T, U> {
         }
     }
 
-    fn get_status(&self, pid: Pid, correlation_id: usize) {
+    fn get_status(&self, pid: Pid, correlation_id: CorrelationId) {
         let status = ExecutorStatus {
-            correlation_id: correlation_id,
             total_processes: self.processes.len(),
             system_threads: self.system_senders.keys().cloned().collect()
         };
         let envelope = SystemEnvelope {
             to: pid,
             from: self.pid.clone(),
-            msg: SystemMsg::ExecutorStatus(status)
+            msg: SystemMsg::ExecutorStatus(status),
+            correlation_id: Some(correlation_id)
         };
         self.route_to_thread(envelope);
     }
@@ -93,9 +94,9 @@ impl<T: Encodable + Decodable + Send, U> Executor<T, U> {
     }
 
     fn route_to_process(&mut self, envelope: ProcessEnvelope<T>) {
-        let ProcessEnvelope {to, from, msg} = envelope;
+        let ProcessEnvelope {to, from, msg, correlation_id} = envelope;
         if let Some(process) = self.processes.get_mut(&to) {
-            for envelope in process.handle(msg, from).drain(..) {
+            for envelope in process.handle(msg, from, correlation_id).drain(..) {
                 if envelope.to().node == self.node {
                     // This won't ever fail because we hold a ref to both ends of the channel
                     self.tx.send(ExecutorMsg::User(envelope)).unwrap();

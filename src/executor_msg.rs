@@ -3,8 +3,7 @@ use rustc_serialize::{Encodable, Decodable};
 use envelope::{Envelope, SystemEnvelope};
 use process::Process;
 use pid::Pid;
-
-pub type CorrelationId = usize;
+use correlation_id::CorrelationId;
 
 pub enum ExecutorMsg<T: Encodable + Decodable, U> {
     Start(Pid, Box<Process<T, U>>),

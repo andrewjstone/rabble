@@ -3,7 +3,6 @@ use node_id::NodeId;
 use members::Members;
 
 pub struct ClusterStatus {
-    pub correlation_id: usize,
     pub members: Members,
     pub connected: HashSet<NodeId>
 }
