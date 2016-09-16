@@ -29,15 +29,15 @@ impl<T: Encodable + Decodable, U: Debug + Clone> Node<T, U> {
         self.executor_tx.send(msg)
     }
 
-    pub fn executor_status(&self, pid: Pid, correlation_id: CorrelationId)
+    pub fn executor_status(&self, from: Pid, correlation_id: CorrelationId)
         -> Result<(), SendError<ExecutorMsg<T, U>>>
     {
-            self.executor_tx.send(ExecutorMsg::GetStatus(pid, correlation_id))
+            self.executor_tx.send(ExecutorMsg::GetStatus(from, correlation_id))
     }
 
-    pub fn cluster_status(&self, pid: Pid, correlation_id: CorrelationId)
+    pub fn cluster_status(&self, from: Pid, correlation_id: CorrelationId)
         -> Result<(), SendError<ClusterMsg<T>>>
     {
-        self.cluster_tx.send(ClusterMsg::GetStatus(pid, correlation_id))
+        self.cluster_tx.send(ClusterMsg::GetStatus(from, correlation_id))
     }
 }

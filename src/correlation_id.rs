@@ -6,9 +6,9 @@
 
 #[derive(Debug, Clone, Eq, PartialEq, RustcEncodable, RustcDecodable)]
 pub struct CorrelationId {
-    handler: usize,
-    connection: Option<usize>,
-    request: Option<usize>
+    pub handler: usize,
+    pub connection: Option<usize>,
+    pub request: Option<usize>
 }
 
 impl CorrelationId {

@@ -1,7 +1,7 @@
 use std::sync::mpsc::{channel, Sender, Receiver};
 use std::collections::HashMap;
 use std::fmt::Debug;
-use amy::{self, Poller, Registrar};
+use amy::{self, Poller, Registrar, Notification};
 use pid::Pid;
 use rustc_serialize::{Encodable, Decodable};
 use executor_msg::ExecutorMsg;
@@ -13,6 +13,7 @@ use node::Node;
 type PollId = usize;
 type HandlerId = usize;
 
+#[derive(Debug, Clone)]
 pub enum ServiceError {
     DefaultHandlerAlreadyExists
 }
@@ -20,13 +21,13 @@ pub enum ServiceError {
 /// A system service that operates on a single thread. A service is registered via its pid
 /// with the executor and can send and receive messages to processes as well as other services.
 pub struct Service<T: Encodable + Decodable, U: Debug + Clone> {
-    pid: Pid,
+    pub pid: Pid,
     request_count: usize,
     rx: amy::Receiver<SystemEnvelope<U>>,
     node: Node<T, U>,
     poller: Poller,
     registrar: Registrar,
-    poll_ids: HashMap<PollId, HandlerId>,
+    handler_ids: HashMap<PollId, HandlerId>,
     default_handler_id: Option<HandlerId>,
     handlers: Vec<Box<Handler<T, U>>>
 }
@@ -50,7 +51,7 @@ impl<T: Encodable + Decodable, U: Debug + Clone> Service<T, U> {
             node: node,
             poller: poller,
             registrar: registrar,
-            poll_ids: HashMap::new(),
+            handler_ids: HashMap::new(),
             default_handler_id: None,
             handlers: Vec::new()
         }
@@ -74,7 +75,7 @@ impl<T: Encodable + Decodable, U: Debug + Clone> Service<T, U> {
         if spec.requires_poller {
             // Keep track of which handler corresponds to each poll id
             for poll_id in handler.register_with_poller(&self.registrar) {
-                self.poll_ids.insert(poll_id, handler_id);
+                self.handler_ids.insert(poll_id, handler_id);
             }
         }
 
@@ -84,6 +85,45 @@ impl<T: Encodable + Decodable, U: Debug + Clone> Service<T, U> {
 
     pub fn wait(&mut self) {
         // TODO: Configurable timeout?
-        let notifications = self.poller.wait(1000).unwrap();
+        for notification in self.poller.wait(1000).unwrap() {
+            if notification.id == self.rx.get_id() {
+                self.handle_system_envelopes();
+            } else {
+                self.handle_notification(notification);
+            }
+        }
+    }
+
+    pub fn handle_system_envelopes(&mut self) {
+        while let Ok(envelope) = self.rx.try_recv() {
+            if envelope.correlation_id.is_some() {
+                let handler_id = envelope.correlation_id.as_ref().unwrap().handler;
+                if let Some(handler) = self.handlers.get_mut(handler_id) {
+                    handler.handle_system_envelope(&self.node, envelope);
+                } else {
+                    // TODO: Log error
+                }
+            } else {
+                if let Some(handler_id) = self.default_handler_id {
+                    if let Some(handler) = self.handlers.get_mut(handler_id) {
+                        handler.handle_system_envelope(&self.node, envelope);
+                    } else {
+                        // TODO: Log error
+                    }
+                } else {
+                    // TODO: Log error
+                }
+            }
+        }
+    }
+
+    pub fn handle_notification(&mut self, notification: Notification) {
+        self.handler_ids.get(&notification.id).cloned().map(|id| {
+            if let Some(handler) = self.handlers.get_mut(id) {
+                handler.handle_notification(&self.node, notification, &self.registrar);
+            } else {
+                // TODO: Logging
+            }
+        });
     }
 }
