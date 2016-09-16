@@ -1,16 +1,18 @@
 use std::marker::PhantomData;
+use std::fmt::Debug;
 use rustc_serialize::{Encodable, Decodable};
 use service::Service;
 use handler::{Handler, HandlerSpec};
 use envelope::SystemEnvelope;
+use node::Node;
 
-pub struct SystemEnvelopeHandler<T: Encodable+Decodable, U> {
+pub struct SystemEnvelopeHandler<T: Encodable+Decodable, U: Debug + Clone> {
     id: usize,
     callback: Box<Fn(SystemEnvelope<U>)>,
     unused: PhantomData<T>
 }
 
-impl<T: Encodable+Decodable, U>  SystemEnvelopeHandler<T, U> {
+impl<T, U> SystemEnvelopeHandler<T, U> where T: Encodable + Decodable, U: Debug + Clone {
     pub fn new<F>(callback: F) -> SystemEnvelopeHandler<T, U>
       where F: Fn(SystemEnvelope<U>) + 'static {
           SystemEnvelopeHandler {
@@ -21,7 +23,8 @@ impl<T: Encodable+Decodable, U>  SystemEnvelopeHandler<T, U> {
     }
 }
 
-impl<T: Encodable + Decodable, U> Handler<T, U> for SystemEnvelopeHandler<T, U> {
+impl<T, U> Handler<T, U> for SystemEnvelopeHandler<T, U>
+  where T: Encodable + Decodable, U: Debug + Clone {
 
     fn set_id(&mut self, id: usize) {
         self.id = id
@@ -34,7 +37,7 @@ impl<T: Encodable + Decodable, U> Handler<T, U> for SystemEnvelopeHandler<T, U> 
         }
     }
 
-    fn handle_system_envelope(&mut self, envelope: SystemEnvelope<U>) {
+    fn handle_system_envelope(&mut self, node: &Node<T, U>, envelope: SystemEnvelope<U>) {
         let ref f = self.callback;
         f(envelope);
     }

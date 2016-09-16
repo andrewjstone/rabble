@@ -1,11 +1,11 @@
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{Sender, SendError};
 use std::fmt::Debug;
 use rustc_serialize::{Encodable, Decodable};
 use node_id::NodeId;
 use executor_msg::ExecutorMsg;
 use cluster_msg::ClusterMsg;
-use service::Service;
 use pid::Pid;
+use correlation_id::CorrelationId;
 
 #[derive(Clone)]
 pub struct Node<T: Encodable + Decodable, U: Debug + Clone> {
@@ -25,12 +25,19 @@ impl<T: Encodable + Decodable, U: Debug + Clone> Node<T, U> {
         }
     }
 
-    pub fn register_service(&self, name: &str) -> Service<T, U> {
-        let pid = Pid {
-            name: name.to_string(),
-            group: Some("Service".to_string()),
-            node: self.id.clone()
-        };
-        Service::new(pid, self.executor_tx.clone(), self.cluster_tx.clone())
+    pub fn send(&self, msg: ExecutorMsg<T, U>) -> Result<(), SendError<ExecutorMsg<T, U>>> {
+        self.executor_tx.send(msg)
+    }
+
+    pub fn executor_status(&self, pid: Pid, correlation_id: CorrelationId)
+        -> Result<(), SendError<ExecutorMsg<T, U>>>
+    {
+            self.executor_tx.send(ExecutorMsg::GetStatus(pid, correlation_id))
+    }
+
+    pub fn cluster_status(&self, pid: Pid, correlation_id: CorrelationId)
+        -> Result<(), SendError<ClusterMsg<T>>>
+    {
+        self.cluster_tx.send(ClusterMsg::GetStatus(pid, correlation_id))
     }
 }

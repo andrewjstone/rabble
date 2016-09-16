@@ -8,6 +8,7 @@ use executor_msg::ExecutorMsg;
 use cluster_msg::ClusterMsg;
 use handler::Handler;
 use envelope::{Envelope, SystemEnvelope};
+use node::Node;
 
 type PollId = usize;
 type HandlerId = usize;
@@ -21,10 +22,8 @@ pub enum ServiceError {
 pub struct Service<T: Encodable + Decodable, U: Debug + Clone> {
     pid: Pid,
     request_count: usize,
-    tx: amy::Sender<SystemEnvelope<U>>,
     rx: amy::Receiver<SystemEnvelope<U>>,
-    executor_tx: Sender<ExecutorMsg<T, U>>,
-    cluster_tx: Sender<ClusterMsg<T>>,
+    node: Node<T, U>,
     poller: Poller,
     registrar: Registrar,
     poll_ids: HashMap<PollId, HandlerId>,
@@ -33,21 +32,22 @@ pub struct Service<T: Encodable + Decodable, U: Debug + Clone> {
 }
 
 impl<T: Encodable + Decodable, U: Debug + Clone> Service<T, U> {
-    pub fn new(pid: Pid,
-               executor_tx: Sender<ExecutorMsg<T, U>>,
-               cluster_tx: Sender<ClusterMsg<T>>) -> Service<T, U> {
+    pub fn new(name: &str, node: Node<T, U>) -> Service<T, U> {
+        let pid = Pid {
+            name: name.to_string(),
+            group: Some("Service".to_string()),
+            node: node.id.clone()
+        };
         let poller = Poller::new().unwrap();
         let registrar = poller.get_registrar();
         let (tx, rx) = registrar.channel().unwrap();
-        let msg = ExecutorMsg::RegisterSystemThread(pid.clone(), tx.clone());
-        executor_tx.send(msg).unwrap();
+        let msg = ExecutorMsg::RegisterSystemThread(pid.clone(), tx);
+        node.send(msg).unwrap();
         Service {
             pid: pid,
             request_count: 0,
-            tx: tx,
             rx: rx,
-            executor_tx: executor_tx,
-            cluster_tx: cluster_tx,
+            node: node,
             poller: poller,
             registrar: registrar,
             poll_ids: HashMap::new(),
@@ -72,10 +72,10 @@ impl<T: Encodable + Decodable, U: Debug + Clone> Service<T, U> {
         }
 
         if spec.requires_poller {
-            let poll_id = handler.register_with_poller(&self.registrar);
             // Keep track of which handler corresponds to each poll id
-            // Note that a handler can have multiple poll ids
-            self.poll_ids.insert(poll_id, handler_id);
+            for poll_id in handler.register_with_poller(&self.registrar) {
+                self.poll_ids.insert(poll_id, handler_id);
+            }
         }
 
         self.handlers.push(handler);
@@ -83,5 +83,7 @@ impl<T: Encodable + Decodable, U: Debug + Clone> Service<T, U> {
     }
 
     pub fn wait(&mut self) {
+        // TODO: Configurable timeout?
+        let notifications = self.poller.wait(1000).unwrap();
     }
 }

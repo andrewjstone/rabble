@@ -30,6 +30,7 @@ pub use node::Node;
 pub use pid::Pid;
 pub use process::Process;
 pub use envelope::Envelope;
+pub use service::Service;
 
 use std::thread::{self, JoinHandle};
 use std::sync::mpsc::channel;
