@@ -32,6 +32,7 @@ pub use process::Process;
 pub use envelope::Envelope;
 pub use service::Service;
 pub use correlation_id::CorrelationId;
+pub use system_msg::SystemMsg;
 pub use system_envelope_handler::SystemEnvelopeHandler;
 
 use std::thread::{self, JoinHandle};

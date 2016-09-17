@@ -29,7 +29,7 @@ pub struct Service<T: Encodable + Decodable, U: Debug + Clone> {
     registrar: Registrar,
     handler_ids: HashMap<PollId, HandlerId>,
     default_handler_id: Option<HandlerId>,
-    handlers: Vec<Box<Handler<T, U>>>
+    handlers: Vec<Box<Handler<T, U> + Send>>
 }
 
 impl<T: Encodable + Decodable, U: Debug + Clone> Service<T, U> {
@@ -59,7 +59,7 @@ impl<T: Encodable + Decodable, U: Debug + Clone> Service<T, U> {
 
     /// Add a new handler and return it's Id. Return an error if this handler attempts to set a
     /// default handler when one already exists.
-    pub fn add_handler(&mut self, mut handler: Box<Handler<T, U>>) -> Result<usize, ServiceError> {
+    pub fn add_handler(&mut self, mut handler: Box<Handler<T, U> + Send>) -> Result<usize, ServiceError> {
         let handler_id = self.handlers.len();
         handler.set_id(handler_id);
         let spec = handler.get_spec();

@@ -8,13 +8,13 @@ use node::Node;
 
 pub struct SystemEnvelopeHandler<T: Encodable+Decodable, U: Debug + Clone> {
     id: usize,
-    callback: Box<Fn(SystemEnvelope<U>)>,
+    callback: Box<Fn(SystemEnvelope<U>) + Send>,
     unused: PhantomData<T>
 }
 
 impl<T, U> SystemEnvelopeHandler<T, U> where T: Encodable + Decodable, U: Debug + Clone {
     pub fn new<F>(callback: F) -> SystemEnvelopeHandler<T, U>
-      where F: Fn(SystemEnvelope<U>) + 'static {
+      where F: Fn(SystemEnvelope<U>) + 'static + Send {
           SystemEnvelopeHandler {
               id: 0, // Will be replaced with the correct id when registerd with the service
               callback: Box::new(callback),
