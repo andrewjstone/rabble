@@ -24,6 +24,7 @@ mod service;
 mod handler;
 mod correlation_id;
 mod system_envelope_handler;
+mod connection;
 
 pub use node_id::NodeId;
 pub use node::Node;
@@ -34,6 +35,12 @@ pub use service::Service;
 pub use correlation_id::CorrelationId;
 pub use system_msg::SystemMsg;
 pub use system_envelope_handler::SystemEnvelopeHandler;
+pub use connection::{
+    WriteResult,
+    MsgReader,
+    MsgWriter,
+    Connection
+};
 
 use std::thread::{self, JoinHandle};
 use std::sync::mpsc::channel;
