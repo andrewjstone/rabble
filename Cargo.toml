@@ -14,6 +14,7 @@ rustc-serialize = "0.3"
 rmp-serialize = "0.7"
 time = "0.1"
 net2 = "0.2"
+error-chain = "0.5"
 
 [dev-dependencies]
 assert_matches = "1.0"

@@ -107,23 +107,19 @@ pub struct Connection<T: ConnectionTypes> {
 }
 
 impl<T: ConnectionTypes> Connection<T> {
-    /// Return a function that will create a new Connection
-    pub fn make_connection_factory() -> Box<Fn(usize, T::Socket) -> Connection<T>>
-    {
-        Box::new(move |id, socket| {
-            Connection {
-                id: id,
-                state: T::State::new(),
-                sock: socket,
-                msg_writer: T::MsgWriter::new(),
-                msg_reader: T::MsgReader::new(),
-                system_envelope_callback: T::system_envelope_callback,
-                network_msg_callback: T::network_msg_callback,
-                total_network_msgs_sent: 0,
-                total_network_msgs_received: 0,
-                total_system_envelopes_received: 0,
-                total_system_requests_sent: 0,
-            }
-        })
+    pub fn new(id: usize, socket: T::Socket) -> Connection<T> {
+        Connection {
+            id: id,
+            state: T::State::new(),
+            sock: socket,
+            msg_writer: T::MsgWriter::new(),
+            msg_reader: T::MsgReader::new(),
+            system_envelope_callback: T::system_envelope_callback,
+            network_msg_callback: T::network_msg_callback,
+            total_network_msgs_sent: 0,
+            total_network_msgs_received: 0,
+            total_system_envelopes_received: 0,
+            total_system_requests_sent: 0,
+        }
     }
 }

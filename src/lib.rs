@@ -1,3 +1,8 @@
+#![recursion_limit = "1024"]
+
+#[macro_use]
+extern crate error_chain;
+
 extern crate orset;
 extern crate rustc_serialize;
 extern crate rmp_serialize as msgpack;
@@ -5,6 +10,7 @@ extern crate amy;
 extern crate time;
 extern crate net2;
 
+mod errors;
 mod node_id;
 mod node;
 mod members;
@@ -24,6 +30,7 @@ mod service;
 mod handler;
 mod correlation_id;
 mod system_envelope_handler;
+mod tcp_server_handler;
 mod connection;
 
 pub use node_id::NodeId;
