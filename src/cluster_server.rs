@@ -107,7 +107,7 @@ impl<T: Encodable + Decodable, U> ClusterServer<T, U> {
         }
     }
 
-    fn get_status(&self, pid: Pid, correlation_id: CorrelationId) {
+    fn get_status(&self, pid: Pid, correlation_id: Option<CorrelationId>) {
         let status = ClusterStatus {
             members: self.members.clone(),
             connected: self.established.keys().cloned().collect()
@@ -116,7 +116,7 @@ impl<T: Encodable + Decodable, U> ClusterServer<T, U> {
             to: pid,
             from: self.pid.clone(),
             msg: SystemMsg::ClusterStatus(status),
-            correlation_id: Some(correlation_id)
+            correlation_id: correlation_id
         };
         // Route the response through the executor since it knows how to contact all Pids
         let envelope = Envelope::System(system_envelope);

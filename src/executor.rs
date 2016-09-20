@@ -62,7 +62,7 @@ impl<T: Encodable + Decodable + Send, U: Debug> Executor<T, U> {
         }
     }
 
-    fn get_status(&self, pid: Pid, correlation_id: CorrelationId) {
+    fn get_status(&self, pid: Pid, correlation_id: Option<CorrelationId>) {
         let status = ExecutorStatus {
             total_processes: self.processes.len(),
             system_threads: self.system_senders.keys().cloned().collect()
@@ -71,7 +71,7 @@ impl<T: Encodable + Decodable + Send, U: Debug> Executor<T, U> {
             to: pid,
             from: self.pid.clone(),
             msg: SystemMsg::ExecutorStatus(status),
-            correlation_id: Some(correlation_id)
+            correlation_id: correlation_id
         };
         self.route_to_thread(envelope);
     }

@@ -4,22 +4,29 @@ use rustc_serialize::{Encodable, Decodable};
 use amy::{Notification, Registrar};
 use envelope::SystemEnvelope;
 use node::Node;
+use errors::*;
 
-/// Specifies how this handler is to be used by a Service
-pub struct HandlerSpec {
-    pub default_handler: bool,
-    pub requires_poller: bool
-}
-
-// A service handler
+/// A service handler
 pub trait Handler<T: Encodable + Decodable, U: Debug + Clone> {
-    fn set_id(&mut self, id: usize);
-    fn get_spec(&self) -> HandlerSpec;
-    fn register_with_poller(&mut self, &Registrar) -> Vec<usize> {
-        panic!("register_with_poller not implemented, but spec has requires_poller")
+    /// A callback function used to initialize the handler.
+    ///
+    /// The handler is expected to register any necessary timeouts or listening sockets with the
+    /// poller and send any initialization messages via the Node. Some handlers may not need any
+    /// initialization, so this callback is optional.
+    fn init(&mut self, &Registrar, &Node<T, U>) -> Result<()> {
+        Ok(())
     }
-    fn handle_notification(&mut self, &Node<T, U>, Notification, &Registrar) {
-        panic!("handle_notification not implemented, but spec has requires_poller")
+
+    /// Handle poll notifications.
+
+    /// Some handler don't register anything that requires notification and only receive system
+    /// envelopes. Those handlers do not need to implement this function.
+    fn handle_notification(&mut self, &Node<T, U>, Notification, &Registrar) -> Result<()> {
+        // TODO: Log message
+        Ok(())
     }
-    fn handle_system_envelope(&mut self, &Node<T, U>, SystemEnvelope<U>);
+
+    /// Handle any system envelopes addressed to the Service's Pid. All handlers must implement
+    /// this function.
+    fn handle_system_envelope(&mut self, &Node<T, U>, SystemEnvelope<U>) -> Result<()>;
 }

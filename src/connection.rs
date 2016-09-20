@@ -1,5 +1,6 @@
 use std::io::{self, Read, Write};
 use std::fmt::Debug;
+use std::os::unix::io::AsRawFd;
 use rustc_serialize::{Encodable, Decodable};
 use node::Node;
 use envelope::SystemEnvelope;
@@ -44,12 +45,9 @@ pub trait MsgWriter {
     /// Create a new MsgWriter
     fn new() -> Self;
 
-    /// Complete the write of a single message that's already in the buffer or the message passed in
-    /// if no other messages are buffered.
-    ///
-    /// If there are still messages in the buffer to write, but no new messages, this function can
-    /// be called with `msg = None`.
-    fn write_msg<T: Write>(&mut self, writer: &mut T, msg: Option<Self::Msg>) -> WriteResult;
+    /// Complete the write of a single message that's already in the buffer or one of the message
+    /// passed in if no other messages are buffered.
+    fn write_msg<T: Write>(&mut self, writer: &mut T, msgs: Vec<Self::Msg>) -> WriteResult;
 }
 
 /// A simple constructor for a Generic State
@@ -62,48 +60,48 @@ pub trait State {
 /// This trait also contains the 2 callback functions needed for a connection
 pub trait ConnectionTypes {
     type State: State;
-    type Socket: Read + Write;
+    type Socket: Read + Write + AsRawFd;
     type ProcessMsg: Encodable + Decodable;
     type SystemMsgTypeParameter: Debug + Clone;
     type MsgWriter: MsgWriter + 'static;
     type MsgReader: MsgReader + 'static;
 
-    fn system_envelope_callback(Self::State,
+    fn system_envelope_callback(&mut Self::State,
                                 &Node<Self::ProcessMsg, Self::SystemMsgTypeParameter>,
                                 SystemEnvelope<Self::SystemMsgTypeParameter>)
         -> Vec<<<Self as ConnectionTypes>::MsgWriter as MsgWriter>::Msg>;
 
-    fn network_msg_callback(Self::State,
+    fn network_msg_callback(&mut Self::State,
                             &Node<Self::ProcessMsg, Self::SystemMsgTypeParameter>,
                             <<Self as ConnectionTypes>::MsgReader as MsgReader>::Msg)
         -> Vec<<<Self as ConnectionTypes>::MsgWriter as MsgWriter>::Msg>;
 }
 
-type SystemEnvelopeCallback<T: ConnectionTypes> =
-    fn(T::State,
+pub type SystemEnvelopeCallback<T: ConnectionTypes> =
+    fn(&mut T::State,
        &Node<T::ProcessMsg, T::SystemMsgTypeParameter>,
        SystemEnvelope<T::SystemMsgTypeParameter>)
   -> Vec<<<T as ConnectionTypes>::MsgWriter as MsgWriter>::Msg>;
 
-type NetworkMsgCallback<T: ConnectionTypes> =
-    fn(T::State,
+pub type NetworkMsgCallback<T: ConnectionTypes> =
+    fn(&mut T::State,
        &Node<T::ProcessMsg, T::SystemMsgTypeParameter>,
        <<T as ConnectionTypes>::MsgReader as MsgReader>::Msg)
   -> Vec<<<T as ConnectionTypes>::MsgWriter as MsgWriter>::Msg>;
 
 
 pub struct Connection<T: ConnectionTypes> {
-    id: usize,
-    state: T::State,
-    sock: T::Socket,
-    msg_writer: T::MsgWriter,
-    msg_reader: T::MsgReader,
-    system_envelope_callback: SystemEnvelopeCallback<T>,
-    network_msg_callback: NetworkMsgCallback<T>,
-    total_network_msgs_sent: usize,
-    total_network_msgs_received: usize,
-    total_system_envelopes_received: usize,
-    total_system_requests_sent: usize
+    pub id: usize,
+    pub state: T::State,
+    pub sock: T::Socket,
+    pub msg_writer: T::MsgWriter,
+    pub msg_reader: T::MsgReader,
+    pub system_envelope_callback: SystemEnvelopeCallback<T>,
+    pub network_msg_callback: NetworkMsgCallback<T>,
+    pub total_network_msgs_sent: usize,
+    pub total_network_msgs_received: usize,
+    pub total_system_envelopes_received: usize,
+    pub total_system_requests_sent: usize
 }
 
 impl<T: ConnectionTypes> Connection<T> {
