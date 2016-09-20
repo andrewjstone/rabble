@@ -32,12 +32,7 @@ impl<T, U, H> Service<T, U, H>
           U: Debug + Clone,
           H: Handler<T, U>
 {
-    pub fn new(name: &str, node: Node<T, U>, handler: H) -> Service<T, U, H> {
-        let pid = Pid {
-            name: name.to_string(),
-            group: Some("Service".to_string()),
-            node: node.id.clone()
-        };
+    pub fn new(pid: Pid, node: Node<T, U>, handler: H) -> Service<T, U, H> {
         let poller = Poller::new().unwrap();
         let registrar = poller.get_registrar();
         let (tx, rx) = registrar.channel().unwrap();

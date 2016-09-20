@@ -5,6 +5,7 @@ use handler::Handler;
 use envelope::SystemEnvelope;
 use node::Node;
 use errors::*;
+use pid::Pid;
 
 pub struct SystemEnvelopeHandler<T: Encodable+Decodable, U: Debug + Clone> {
     callback: Box<Fn(SystemEnvelope<U>) + Send>,
