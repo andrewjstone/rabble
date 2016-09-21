@@ -4,12 +4,18 @@ use std::net::{TcpListener, TcpStream};
 use std::collections::HashMap;
 use std::io;
 use rustc_serialize::{Encodable, Decodable};
-use amy::{Registrar, Notification, Event};
+use amy::{Registrar, Notification, Event, Timer};
 use errors::*;
 use handler::Handler;
 use envelope::SystemEnvelope;
 use node::Node;
 use connection::{ConnectionTypes, Connection, MsgWriter, MsgReader, WriteResult};
+use timer_wheel::TimerWheel;
+
+struct ConnectionState<C: ConnectionTypes> {
+    connection: Connection<C>,
+    timer_wheel_slot: usize
+}
 
 /// A service handler for an async TCP server
 pub struct TcpServerHandler<T, U, C>
@@ -20,9 +26,10 @@ pub struct TcpServerHandler<T, U, C>
     total_connections: usize,
     listener: TcpListener,
     listener_id: usize,
-    connection_timeout: Option<usize>, // ms
-    request_timeout: usize, // ms
-    connections: HashMap<usize, Connection<C>>,
+    timeout: Option<usize>, // ms
+    connections: HashMap<usize, ConnectionState<C>>,
+    timer: Option<Timer>,
+    timer_wheel: Option<TimerWheel<usize>>,
     unused1: PhantomData<T>,
     unused2: PhantomData<U>
 }
@@ -35,23 +42,25 @@ impl <T, U, C> TcpServerHandler<T, U, C>
     /// Create a new TcpServerHandler
     ///
     /// Bind to `addr` and close a connection that hasn't received a message in `connection_timeout`
-    /// ms. Passing None for a `connection_timeout` disables connection timeouts.
-    ///
-    /// Timeout requests made from the handler in `request_timeout` ms. This timeout is not
-    /// optional as a request can always fail or be delayed indefinitely.
+    /// ms.
     pub fn new(addr: &str,
-               connection_timeout: Option<usize>,
-               request_timeout: usize) -> TcpServerHandler<T, U, C>
+               connection_timeout: Option<usize>) -> TcpServerHandler<T, U, C>
     {
+        let timer = None;
+        let mut timer_wheel = None;
+        if connection_timeout.is_some() {
+            timer_wheel = Some(TimerWheel::new(2));
+        }
         let listener = TcpListener::bind(addr).unwrap();
         listener.set_nonblocking(true).unwrap();
         TcpServerHandler {
             total_connections: 0,
             listener: listener,
             listener_id: 0,
-            connection_timeout: connection_timeout,
-            request_timeout: request_timeout,
+            timeout: connection_timeout,
             connections: HashMap::new(),
+            timer: timer,
+            timer_wheel: timer_wheel,
             unused1: PhantomData,
             unused2: PhantomData
         }
@@ -66,7 +75,12 @@ impl <T, U, C> TcpServerHandler<T, U, C>
                     let id = try!(registrar.register(&socket, Event::Read)
                                   .chain_err(|| "Failed to register accepted socket for reading"));
                     let connection = Connection::new(id, socket);
-                    self.connections.insert(id, connection);
+                    let connection_state = ConnectionState {
+                        connection: connection,
+                        timer_wheel_slot: self.timer_wheel.as_mut().map_or(0,
+                                                                           |mut tw| tw.insert(id))
+                    };
+                    self.connections.insert(id, connection_state);
                 },
                 Err(e) => {
                     if e.kind() == io::ErrorKind::WouldBlock {
@@ -74,6 +88,37 @@ impl <T, U, C> TcpServerHandler<T, U, C>
                     }
                     return Err(e.into())
                 }
+            }
+        }
+    }
+
+    fn handle_connection_notification(&mut self,
+                                      notification: &Notification,
+                                      node: &Node<T, U>,
+                                      registrar: &Registrar) -> Result<()>
+    {
+        if let Some(connection_state) = self.connections.get_mut(&notification.id) {
+            let mut writable = true;
+
+            if notification.event.readable() {
+                writable = try!(handle_readable(connection_state, node, registrar));
+                update_connection_timeout(connection_state, &mut self.timer_wheel);
+            }
+
+            if notification.event.writable() {
+                writable = try!(write_messages(&mut connection_state.connection, vec![], registrar));
+            }
+
+            try!(reregister(notification.id, &connection_state.connection, registrar, writable));
+        }
+        Ok(())
+    }
+
+    fn tick(&mut self, node: &Node<T, U>, registrar: &Registrar) {
+        for id in self.timer_wheel.as_mut().unwrap().expire() {
+            if let Some(connection_state) = self.connections.remove(&id) {
+                let _ = registrar.deregister(connection_state.connection.sock);
+                // TODO: Log connection timeout
             }
         }
     }
@@ -87,6 +132,11 @@ impl<T, U, C> Handler<T, U> for TcpServerHandler<T, U, C>
     fn init(&mut self, registrar: &Registrar, node: &Node<T, U>) -> Result<()> {
         self.listener_id = try!(registrar.register(&self.listener, Event::Read)
                                 .chain_err(|| "Failed to register listener"));
+
+        if self.timeout.is_some() {
+            self.timer = Some(try!(registrar.set_interval(self.timeout.unwrap())
+                              .chain_err(|| "Failed to register tick timer")));
+        }
         Ok(())
     }
 
@@ -99,23 +149,19 @@ impl<T, U, C> Handler<T, U> for TcpServerHandler<T, U, C>
             return self.accept_connections(node, registrar);
         }
 
-        // TODO: check for timeouts here
-
-        if let Some(connection) = self.connections.get_mut(&notification.id) {
-            let mut writable = true;
-
-            if notification.event.readable() {
-                writable = try!(handle_readable(connection, node, registrar));
-            }
-
-            if notification.event.writable() {
-                writable = try!(write_messages(connection, vec![], registrar));
-            }
-
-            return reregister(notification.id, connection, registrar, writable);
+        if self.timer.is_some() && notification.id == self.timer.as_ref().unwrap().get_id() {
+            self.tick(&node, &registrar);
+            return Ok(());
         }
 
-        Ok(())
+        if let Err(e) = self.handle_connection_notification(&notification, &node, &registrar) {
+            // Unwrap is correct here since the above call only fails if the connection exists
+            let connection_state = self.connections.remove(&notification.id).unwrap();
+            let _ = registrar.deregister(connection_state.connection.sock);
+            return Err(e);
+        }
+        Ok (())
+
     }
 
     fn handle_system_envelope(&mut self,
@@ -127,7 +173,7 @@ impl<T, U, C> Handler<T, U> for TcpServerHandler<T, U, C>
 }
 
 /// Handle any readable notifications. Returns whether the socket is still writable.
-fn handle_readable<T, U, C>(connection: &mut Connection<C>,
+fn handle_readable<T, U, C>(connection_state: &mut ConnectionState<C>,
                             node: &Node<T, U>,
                             registrar: &Registrar) -> Result<bool>
     where T: Encodable + Decodable,
@@ -135,6 +181,7 @@ fn handle_readable<T, U, C>(connection: &mut Connection<C>,
           C: ConnectionTypes<Socket=TcpStream, ProcessMsg=T, SystemMsgTypeParameter=U>
 {
     let mut writable = true;
+    let ref mut connection = connection_state.connection;
     while let Some(msg) = try!(connection.msg_reader.read_msg(&mut connection.sock)) {
         let f = connection.network_msg_callback;
         let responses = f(&mut connection.state, node, msg);
@@ -179,3 +226,12 @@ fn write_messages<C: ConnectionTypes>(
     }
 }
 
+fn update_connection_timeout<C>(connection_state: &mut ConnectionState<C>,
+                                timer_wheel: &mut Option<TimerWheel<usize>>)
+    where C: ConnectionTypes
+{
+    if timer_wheel.is_none() { return; }
+    let mut timer_wheel = timer_wheel.as_mut().unwrap();
+    timer_wheel.remove(&connection_state.connection.id, connection_state.timer_wheel_slot);
+    connection_state.timer_wheel_slot = timer_wheel.insert(connection_state.connection.id);
+}
