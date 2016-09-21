@@ -4,25 +4,13 @@ use std::os::unix::io::AsRawFd;
 use rustc_serialize::{Encodable, Decodable};
 use node::Node;
 use envelope::SystemEnvelope;
-
-/// The result of calling MsgWriter::write_msg()
-pub enum WriteResult {
-    /// The writer needs to be re-registered with the poller
-    WouldBlock,
-    /// There are no more messages to send
-    EmptyBuffer,
-    /// There are more messages to send
-    MoreMessagesInBuffer,
-    /// There was an io error with a kind other than `io::ErrorKind::WouldBlock`
-    Err(io::Error)
-}
+use errors::*;
 
 /// This trait provides for reading framed messages from a `Read` type, decoding them and
 /// returning them. It buffers incomplete messages. Reading of only a single message of a time is to
 /// allow for strategies that prevent starvation of other readers.
 pub trait MsgReader {
     type Msg;
-    type Buffer;
 
     /// Create a new MsgReader
     fn new() -> Self;
@@ -31,23 +19,26 @@ pub trait MsgReader {
     ///
     /// This function should be called until it returns Ok(None) in which case there is no more data
     /// left to return. For async sockets this signals that the socket should be re-registered.
-    fn read_msg<T: Read>(&mut self, reader: &mut T) -> io::Result<Option<Self::Msg>>;
+    fn read_msg<T: Read>(&mut self, reader: &mut T) -> Result<Option<Self::Msg>>;
 }
 
 /// This trait provides for serializing and framing messages, and then writing them to a `Write`
 /// type. When a complete message cannot be sent it is buffered for when the `Write` type is next
-/// writable. Writing of only a single message at a time is to allow for strategies that prevent
-/// starvation of other writers.
+/// writable.
+///
+/// We write all possible data to the writer until it blocks or there is no more data to be written.
+/// Since all output is in response to input, we don't worry about starvation of writers. In order
+/// to minimize memory consumption we just write as much as possible and worry about starvation
+/// management on the reader side.
+///
 pub trait MsgWriter {
     type Msg;
-    type Buffer;
 
     /// Create a new MsgWriter
     fn new() -> Self;
 
-    /// Complete the write of a single message that's already in the buffer or one of the message
-    /// passed in if no other messages are buffered.
-    fn write_msg<T: Write>(&mut self, writer: &mut T, msgs: Vec<Self::Msg>) -> WriteResult;
+    /// Write out as much pending data as possible. Append `msg` to the pending data if not `None`.
+    fn write_msgs<T: Write>(&mut self, writer: &mut T, msg: Option<Self::Msg>) -> Result<bool>;
 }
 
 /// A simple constructor for a Generic State

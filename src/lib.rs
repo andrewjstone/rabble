@@ -32,6 +32,7 @@ mod correlation_id;
 mod system_envelope_handler;
 mod tcp_server_handler;
 mod connection;
+mod msgpack_msgs;
 
 pub use node_id::NodeId;
 pub use node::Node;
@@ -43,11 +44,11 @@ pub use correlation_id::CorrelationId;
 pub use system_msg::SystemMsg;
 pub use system_envelope_handler::SystemEnvelopeHandler;
 pub use connection::{
-    WriteResult,
     MsgReader,
     MsgWriter,
     Connection
 };
+pub use msgpack_msgs::MsgpackReader;
 
 use std::thread::{self, JoinHandle};
 use std::sync::mpsc::channel;

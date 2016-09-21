@@ -9,7 +9,7 @@ use errors::*;
 use handler::Handler;
 use envelope::SystemEnvelope;
 use node::Node;
-use connection::{ConnectionTypes, Connection, MsgWriter, MsgReader, WriteResult};
+use connection::{ConnectionTypes, Connection, MsgWriter, MsgReader};
 use timer_wheel::TimerWheel;
 
 struct ConnectionState<C: ConnectionTypes> {
@@ -106,7 +106,8 @@ impl <T, U, C> TcpServerHandler<T, U, C>
             }
 
             if notification.event.writable() {
-                writable = try!(write_messages(&mut connection_state.connection, vec![], registrar));
+                let ref mut connection = connection_state.connection;
+                writable = try!(connection.msg_writer.write_msgs(&mut connection.sock, None));
             }
 
             try!(reregister(notification.id, &connection_state.connection, registrar, writable));
@@ -185,7 +186,9 @@ fn handle_readable<T, U, C>(connection_state: &mut ConnectionState<C>,
     while let Some(msg) = try!(connection.msg_reader.read_msg(&mut connection.sock)) {
         let f = connection.network_msg_callback;
         let responses = f(&mut connection.state, node, msg);
-        writable = try!(write_messages(connection, responses, registrar));
+        for r in responses {
+            writable = try!(connection.msg_writer.write_msgs(&mut connection.sock, Some(r)));
+        }
     }
     Ok(writable)
 }
@@ -202,27 +205,6 @@ fn reregister<C: ConnectionTypes>(id: usize,
     } else {
         return registrar.reregister(id, &connection.sock, Event::Read)
             .chain_err(|| "Failed to register socket for read events");
-    }
-}
-fn write_messages<C: ConnectionTypes>(
-    connection: &mut Connection<C>,
-    mut output: Vec<<<C as ConnectionTypes>::MsgWriter as MsgWriter>::Msg>,
-    registrar: &Registrar) -> Result<bool>
-{
-    loop {
-        match connection.msg_writer.write_msg(&mut connection.sock, output) {
-            WriteResult::EmptyBuffer => {
-                try!(registrar.register(&connection.sock, Event::Read)
-                     .chain_err(|| "Failed to register socket for read event"));
-                return Ok(true)
-            },
-            WriteResult::WouldBlock => {
-                return Ok(false)
-            },
-            WriteResult::MoreMessagesInBuffer => (),
-            WriteResult::Err(err) => return Err(err.into())
-        }
-        output = Vec::new()
     }
 }
 
