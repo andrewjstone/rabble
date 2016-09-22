@@ -49,7 +49,7 @@ impl<T: Encodable + Decodable + Debug> MsgWriter for MsgpackWriter<T> {
         }
     }
 
-    fn write_msgs<U: Write>(&mut self, writer: &mut U, msg: Option<T>) -> Result<bool> {
+    fn write_msgs<U: Write>(&mut self, writer: &mut U, msg: Option<&T>) -> Result<bool> {
         if msg.is_none() {
             return self.frame_writer.write(writer, None).chain_err(|| "Failed to write encoded message")
         }

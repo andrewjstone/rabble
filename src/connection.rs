@@ -40,7 +40,7 @@ pub trait MsgWriter {
     fn new() -> Self;
 
     /// Write out as much pending data as possible. Append `msg` to the pending data if not `None`.
-    fn write_msgs<T: Write>(&mut self, writer: &mut T, msg: Option<Self::Msg>) -> Result<bool>;
+    fn write_msgs<T: Write>(&mut self, writer: &mut T, msg: Option<&Self::Msg>) -> Result<bool>;
 }
 
 /// A simple constructor for a Generic State
