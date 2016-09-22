@@ -7,10 +7,11 @@ use rustc_serialize::{Encodable, Decodable};
 use amy::{Registrar, Notification, Event, Timer};
 use errors::*;
 use handler::Handler;
-use envelope::SystemEnvelope;
+use envelope::{SystemEnvelope, Envelope};
 use node::Node;
-use connection::{ConnectionTypes, Connection, MsgWriter, MsgReader};
+use connection::{ConnectionTypes, Connection, MsgWriter, MsgReader, ConnectionMsg};
 use timer_wheel::TimerWheel;
+use pid::Pid;
 
 struct ConnectionState<C: ConnectionTypes> {
     connection: Connection<C>,
@@ -23,6 +24,7 @@ pub struct TcpServerHandler<T, U, C>
           U: Debug + Clone,
           C: ConnectionTypes<Socket=TcpStream, ProcessMsg=T, SystemMsgTypeParameter=U>
 {
+    pid: Pid,
     total_connections: usize,
     listener: TcpListener,
     listener_id: usize,
@@ -43,7 +45,8 @@ impl <T, U, C> TcpServerHandler<T, U, C>
     ///
     /// Bind to `addr` and close a connection that hasn't received a message in `connection_timeout`
     /// ms.
-    pub fn new(addr: &str,
+    pub fn new(pid: Pid,
+               addr: &str,
                connection_timeout: Option<usize>) -> TcpServerHandler<T, U, C>
     {
         let timer = None;
@@ -54,6 +57,7 @@ impl <T, U, C> TcpServerHandler<T, U, C>
         let listener = TcpListener::bind(addr).unwrap();
         listener.set_nonblocking(true).unwrap();
         TcpServerHandler {
+            pid: pid,
             total_connections: 0,
             listener: listener,
             listener_id: 0,
@@ -66,7 +70,7 @@ impl <T, U, C> TcpServerHandler<T, U, C>
         }
     }
 
-    fn accept_connections(&mut self, node: &Node<T, U>, registrar: &Registrar) -> Result<()> {
+    fn accept_connections(&mut self, registrar: &Registrar) -> Result<()> {
         loop {
             match self.listener.accept() {
                 Ok((socket, _)) => {
@@ -74,7 +78,7 @@ impl <T, U, C> TcpServerHandler<T, U, C>
                          .chain_err(|| "Failed to make socket nonblocking"));
                     let id = try!(registrar.register(&socket, Event::Read)
                                   .chain_err(|| "Failed to register accepted socket for reading"));
-                    let connection = Connection::new(id, socket);
+                    let connection = Connection::new(self.pid.clone(), id, socket);
                     let connection_state = ConnectionState {
                         connection: connection,
                         timer_wheel_slot: self.timer_wheel.as_mut().map_or(0,
@@ -147,7 +151,7 @@ impl<T, U, C> Handler<T, U> for TcpServerHandler<T, U, C>
                            registrar: &Registrar) -> Result<()>
     {
         if notification.id == self.listener_id {
-            return self.accept_connections(node, registrar);
+            return self.accept_connections(registrar);
         }
 
         if self.timer.is_some() && notification.id == self.timer.as_ref().unwrap().get_id() {
@@ -185,9 +189,18 @@ fn handle_readable<T, U, C>(connection_state: &mut ConnectionState<C>,
     let ref mut connection = connection_state.connection;
     while let Some(msg) = try!(connection.msg_reader.read_msg(&mut connection.sock)) {
         let f = connection.network_msg_callback;
-        let responses = f(&mut connection.state, node, msg);
+        let responses = f(&mut connection.state, msg);
         for r in responses {
-            writable = try!(connection.msg_writer.write_msgs(&mut connection.sock, Some(r)));
+            match r {
+                // TODO: Route this message, cancel any timers
+               ConnectionMsg::Envelope(_envelope) => (),
+               ConnectionMsg::ClientMsg(client_msg, correlation_id) => {
+                    // TODO: Cancel any timers
+                    writable =
+                        try!(connection.msg_writer.write_msgs(&mut connection.sock,
+                                                              Some(client_msg)));
+                }
+            }
         }
     }
     Ok(writable)

@@ -3,8 +3,10 @@ use std::fmt::Debug;
 use std::os::unix::io::AsRawFd;
 use rustc_serialize::{Encodable, Decodable};
 use node::Node;
-use envelope::SystemEnvelope;
+use envelope::{Envelope, SystemEnvelope};
 use errors::*;
+use correlation_id::CorrelationId;
+use pid::Pid;
 
 /// This trait provides for reading framed messages from a `Read` type, decoding them and
 /// returning them. It buffers incomplete messages. Reading of only a single message of a time is to
@@ -54,34 +56,48 @@ pub trait ConnectionTypes {
     type Socket: Read + Write + AsRawFd;
     type ProcessMsg: Encodable + Decodable;
     type SystemMsgTypeParameter: Debug + Clone;
-    type MsgWriter: MsgWriter + 'static;
-    type MsgReader: MsgReader + 'static;
+    type ClientMsg: Encodable + Decodable + Debug;
+    type MsgWriter: MsgWriter<Msg=Self::ClientMsg> + 'static;
+    type MsgReader: MsgReader<Msg=Self::ClientMsg> + 'static;
 
     fn system_envelope_callback(&mut Self::State,
-                                &Node<Self::ProcessMsg, Self::SystemMsgTypeParameter>,
                                 SystemEnvelope<Self::SystemMsgTypeParameter>)
-        -> Vec<<<Self as ConnectionTypes>::MsgWriter as MsgWriter>::Msg>;
-
+        -> Vec<ConnectionMsg<Self::ProcessMsg,
+                             Self::SystemMsgTypeParameter,
+                             Self::ClientMsg>>;
     fn network_msg_callback(&mut Self::State,
-                            &Node<Self::ProcessMsg, Self::SystemMsgTypeParameter>,
-                            <<Self as ConnectionTypes>::MsgReader as MsgReader>::Msg)
-        -> Vec<<<Self as ConnectionTypes>::MsgWriter as MsgWriter>::Msg>;
+                            Self::ClientMsg)
+        -> Vec<ConnectionMsg<Self::ProcessMsg,
+                             Self::SystemMsgTypeParameter,
+                             Self::ClientMsg>>;
+}
+
+/// Connection messages are returned from the callback functions for a Connection.
+///
+/// These messages can be either an envelope as gets used in the rest of the system or a message
+/// specific to this service that can be serialized and sent to a client on the other end of the
+/// connection.
+pub enum ConnectionMsg<T, U, C>
+    where T: Encodable + Decodable,
+          U: Debug + Clone,
+          C: Encodable + Decodable + Debug
+{
+    Envelope(Envelope<T, U>),
+    ClientMsg(C, CorrelationId)
 }
 
 pub type SystemEnvelopeCallback<T: ConnectionTypes> =
     fn(&mut T::State,
-       &Node<T::ProcessMsg, T::SystemMsgTypeParameter>,
        SystemEnvelope<T::SystemMsgTypeParameter>)
-  -> Vec<<<T as ConnectionTypes>::MsgWriter as MsgWriter>::Msg>;
+    -> Vec<ConnectionMsg<T::ProcessMsg, T::SystemMsgTypeParameter, T::ClientMsg>>;
 
 pub type NetworkMsgCallback<T: ConnectionTypes> =
-    fn(&mut T::State,
-       &Node<T::ProcessMsg, T::SystemMsgTypeParameter>,
-       <<T as ConnectionTypes>::MsgReader as MsgReader>::Msg)
-  -> Vec<<<T as ConnectionTypes>::MsgWriter as MsgWriter>::Msg>;
+    fn(&mut T::State, T::ClientMsg)
+    -> Vec<ConnectionMsg<T::ProcessMsg, T::SystemMsgTypeParameter, T::ClientMsg>>;
 
 
 pub struct Connection<T: ConnectionTypes> {
+    pub pid: Pid,
     pub id: usize,
     pub state: T::State,
     pub sock: T::Socket,
@@ -96,8 +112,9 @@ pub struct Connection<T: ConnectionTypes> {
 }
 
 impl<T: ConnectionTypes> Connection<T> {
-    pub fn new(id: usize, socket: T::Socket) -> Connection<T> {
+    pub fn new(pid: Pid, id: usize, socket: T::Socket) -> Connection<T> {
         Connection {
+            pid: pid,
             id: id,
             state: T::State::new(),
             sock: socket,
