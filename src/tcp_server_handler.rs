@@ -120,7 +120,10 @@ impl <T, U, C> TcpServerHandler<T, U, C>
             let mut writable = true;
 
             if notification.event.readable() {
-                writable = try!(handle_readable(connection_state, node, registrar));
+                writable = try!(handle_readable(connection_state,
+                                                &mut self.request_timer_wheel,
+                                                node,
+                                                registrar));
                 update_connection_timeout(connection_state, &mut self.connection_timer_wheel);
             }
 
@@ -156,7 +159,10 @@ impl <T, U, C> TcpServerHandler<T, U, C>
                 let ref mut connection = connection_state.connection;
                 let f = connection.system_envelope_callback;
                 let responses = f(&mut connection.state, envelope);
-                let writable = try!(handle_connection_msgs(responses, connection, node));
+                let writable = try!(handle_connection_msgs(&mut self.request_timer_wheel,
+                                                           responses,
+                                                           connection,
+                                                           node));
                 if !writable {
                     try!(registrar.reregister(correlation_id.connection,
                                               &connection.sock,
@@ -234,6 +240,7 @@ impl<T, U, C> Handler<T, U> for TcpServerHandler<T, U, C>
 
 /// Handle any readable notifications. Returns whether the socket is still writable.
 fn handle_readable<T, U, C>(connection_state: &mut ConnectionState<C>,
+                            request_timer_wheel: &mut TimerWheel<CorrelationId>,
                             node: &Node<T, U>,
                             registrar: &Registrar) -> Result<bool>
     where T: Encodable + Decodable,
@@ -245,7 +252,10 @@ fn handle_readable<T, U, C>(connection_state: &mut ConnectionState<C>,
     while let Some(msg) = try!(connection.msg_reader.read_msg(&mut connection.sock)) {
         let f = connection.network_msg_callback;
         let responses = f(&mut connection.state, msg);
-        let writable = try!(handle_connection_msgs(responses, connection, node));
+        let writable = try!(handle_connection_msgs(request_timer_wheel,
+                                                   responses,
+                                                   connection,
+                                                   node));
     }
     Ok(writable)
 }
@@ -277,8 +287,10 @@ fn update_connection_timeout<C>(connection_state: &mut ConnectionState<C>,
 
 /// Send client replies and route envelopes
 ///
+/// For any envelopes with correlation ids, record them in the request timer wheel.
 /// Return whether the connection is writable or not
-fn handle_connection_msgs<C>(msgs: Vec<ConnectionMsg<C::ProcessMsg,
+fn handle_connection_msgs<C>(request_timer_wheel: &mut TimerWheel<CorrelationId>,
+                             msgs: Vec<ConnectionMsg<C::ProcessMsg,
                                                      C::SystemMsgTypeParameter,
                                                      C::ClientMsg>>,
                              connection: &mut Connection<C>,
@@ -288,9 +300,17 @@ fn handle_connection_msgs<C>(msgs: Vec<ConnectionMsg<C::ProcessMsg,
     let mut writable = true;
     for m in msgs {
         match m {
-            ConnectionMsg::Envelope(envelope) => {
-                // Route the envelope via the executor
-                node.send(ExecutorMsg::User(envelope));
+            ConnectionMsg::Envelope(Envelope::Process(pe)) => {
+                if pe.correlation_id.is_some() {
+                    request_timer_wheel.insert(pe.correlation_id.as_ref().unwrap().clone());
+                }
+                node.send(ExecutorMsg::User(Envelope::Process(pe)));
+            },
+            ConnectionMsg::Envelope(Envelope::System(se))  => {
+                if se.correlation_id.is_some() {
+                    request_timer_wheel.insert(se.correlation_id.as_ref().unwrap().clone());
+                }
+                node.send(ExecutorMsg::User(Envelope::System(se)));
             },
             ConnectionMsg::ClientMsg(client_msg, correlation_id) => {
                 // Respond to the client
