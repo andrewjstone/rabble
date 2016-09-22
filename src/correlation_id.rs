@@ -3,7 +3,7 @@
 /// All correlation ids must have a connection.
 /// Sometimes individual requests aren't tracked so that field is optional.
 
-#[derive(Debug, Clone, Eq, PartialEq, RustcEncodable, RustcDecodable)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq, RustcEncodable, RustcDecodable)]
 pub struct CorrelationId {
     pub connection: usize,
     pub request: Option<usize>
