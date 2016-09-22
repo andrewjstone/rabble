@@ -6,6 +6,7 @@ use envelope::SystemEnvelope;
 use node::Node;
 use errors::*;
 use pid::Pid;
+use amy::Registrar;
 
 pub struct SystemEnvelopeHandler<T: Encodable+Decodable, U: Debug + Clone> {
     callback: Box<Fn(SystemEnvelope<U>) + Send>,
@@ -27,7 +28,8 @@ impl<T, U> Handler<T, U> for SystemEnvelopeHandler<T, U>
 {
     fn handle_system_envelope(&mut self,
                               node: &Node<T, U>,
-                              envelope: SystemEnvelope<U>) -> Result<()>
+                              envelope: SystemEnvelope<U>,
+                              _: &Registrar) -> Result<()>
     {
         (self.callback)(envelope);
         Ok(())

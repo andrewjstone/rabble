@@ -68,7 +68,7 @@ impl<T, U, H> Service<T, U, H>
 
     pub fn handle_system_envelopes(&mut self) -> Result<()> {
         while let Ok(envelope) = self.rx.try_recv() {
-            try!(self.handler.handle_system_envelope(&self.node, envelope));
+            try!(self.handler.handle_system_envelope(&self.node, envelope, &self.registrar));
         }
         Ok(())
     }

@@ -232,8 +232,33 @@ impl<T, U, C> Handler<T, U> for TcpServerHandler<T, U, C>
     /// Handle a system envelope from a process or system thread
     fn handle_system_envelope(&mut self,
                               node: &Node<T, U>,
-                              envelope: SystemEnvelope<U>) -> Result<()>
+                              envelope: SystemEnvelope<U>,
+                              registrar: &Registrar) -> Result<()>
     {
+        if envelope.correlation_id.is_none() {
+            return Err(format!("No correlation id for envelope {:?}", envelope).into());
+        }
+        // Don't bother cancelling request timers... Just ignore the timeouts in the connection if
+        // the request has already received its reply
+        if let Some(connection_state) =
+            self.connections.get_mut(&envelope.correlation_id.as_ref().unwrap().connection)
+        {
+            let correlation_id = envelope.correlation_id.as_ref().unwrap().clone();
+            let ref mut connection = connection_state.connection;
+            let f = connection.system_envelope_callback;
+            let responses = f(&mut connection.state, envelope);
+            let writable = try!(handle_connection_msgs(&mut self.request_timer_wheel,
+                                                       responses,
+                                                       connection,
+                                                       node));
+            if !writable {
+                return registrar.reregister(correlation_id.connection,
+                                            &connection.sock,
+                                            Event::Both)
+                    .chain_err(|| "Failed to reregister socket for read and \
+                                   write events after request tick");
+            }
+        }
         Ok(())
     }
 }

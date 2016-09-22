@@ -28,5 +28,5 @@ pub trait Handler<T: Encodable + Decodable, U: Debug + Clone> {
 
     /// Handle any system envelopes addressed to the Service's Pid. All handlers must implement
     /// this function.
-    fn handle_system_envelope(&mut self, &Node<T, U>, SystemEnvelope<U>) -> Result<()>;
+    fn handle_system_envelope(&mut self, &Node<T, U>, SystemEnvelope<U>, &Registrar) -> Result<()>;
 }
