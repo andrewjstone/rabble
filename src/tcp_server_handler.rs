@@ -40,9 +40,7 @@ pub struct TcpServerHandler<T, U, C>
     connection_timer_wheel: Option<TimerWheel<usize>>,
     request_timeout: usize, // ms
     request_timer: Timer,
-    request_timer_wheel: TimerWheel<CorrelationId>,
-    unused1: PhantomData<T>,
-    unused2: PhantomData<U>
+    request_timer_wheel: TimerWheel<CorrelationId>
 }
 
 impl <T, U, C> TcpServerHandler<T, U, C>
@@ -79,9 +77,7 @@ impl <T, U, C> TcpServerHandler<T, U, C>
             connection_timer_wheel: connection_timer_wheel,
             request_timeout: request_timeout,
             request_timer: Timer {id: 0, fd: 0}, // Dummy timer for now. Will be set in init()
-            request_timer_wheel: TimerWheel::new(TIMER_WHEEL_SLOTS + 1),
-            unused1: PhantomData,
-            unused2: PhantomData
+            request_timer_wheel: TimerWheel::new(TIMER_WHEEL_SLOTS + 1)
         }
     }
 
@@ -156,20 +152,12 @@ impl <T, U, C> TcpServerHandler<T, U, C>
                     msg: SystemMsg::Timeout(correlation_id.clone()),
                     correlation_id: None
                 };
-                let ref mut connection = connection_state.connection;
-                let f = connection.system_envelope_callback;
-                let responses = f(&mut connection.state, envelope);
-                let writable = try!(handle_connection_msgs(&mut self.request_timer_wheel,
-                                                           responses,
-                                                           connection,
-                                                           node));
-                if !writable {
-                    try!(registrar.reregister(correlation_id.connection,
-                                              &connection.sock,
-                                              Event::Both)
-                         .chain_err(|| "Failed to reregister socket for read and \
-                                   write events after request tick"));
-                }
+                try!(run_system_envelope_callback(envelope,
+                                                  correlation_id.connection,
+                                                  &mut connection_state.connection,
+                                                  node,
+                                                  &mut self.request_timer_wheel,
+                                                  registrar));
             }
         }
         Ok(())
@@ -244,20 +232,12 @@ impl<T, U, C> Handler<T, U> for TcpServerHandler<T, U, C>
             self.connections.get_mut(&envelope.correlation_id.as_ref().unwrap().connection)
         {
             let correlation_id = envelope.correlation_id.as_ref().unwrap().clone();
-            let ref mut connection = connection_state.connection;
-            let f = connection.system_envelope_callback;
-            let responses = f(&mut connection.state, envelope);
-            let writable = try!(handle_connection_msgs(&mut self.request_timer_wheel,
-                                                       responses,
-                                                       connection,
-                                                       node));
-            if !writable {
-                return registrar.reregister(correlation_id.connection,
-                                            &connection.sock,
-                                            Event::Both)
-                    .chain_err(|| "Failed to reregister socket for read and \
-                                   write events after request tick");
-            }
+            try!(run_system_envelope_callback(envelope,
+                                              correlation_id.connection,
+                                              &mut connection_state.connection,
+                                              node,
+                                              &mut self.request_timer_wheel,
+                                              registrar));
         }
         Ok(())
     }
@@ -347,4 +327,26 @@ fn handle_connection_msgs<C>(request_timer_wheel: &mut TimerWheel<CorrelationId>
         }
     }
     Ok(writable)
+}
+
+fn run_system_envelope_callback<C>(envelope: SystemEnvelope<C::SystemMsgTypeParameter>,
+                                   connection_id: usize,
+                                   connection: &mut Connection<C>,
+                                   node: &Node<C::ProcessMsg, C::SystemMsgTypeParameter>,
+                                   request_timer_wheel: &mut TimerWheel<CorrelationId>,
+                                   registrar: &Registrar)
+    -> Result<()> where C: ConnectionTypes
+{
+    let f = connection.system_envelope_callback;
+    let responses = f(&mut connection.state, envelope);
+    let writable = try!(handle_connection_msgs(request_timer_wheel,
+                                               responses,
+                                               connection,
+                                               node));
+    if !writable {
+        try!(registrar.reregister(connection_id, &connection.sock, Event::Both)
+             .chain_err(|| "Failed to reregister socket for read and write events \
+                            during run_system_envelope_callback()"));
+    }
+    Ok(())
 }
