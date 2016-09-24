@@ -5,21 +5,21 @@ use amy::{FrameReader, FrameWriter};
 use msgpack::{Encoder, Decoder};
 use rustc_serialize::{Encodable, Decodable};
 use errors::*;
-use protocol::Protocol;
+use serialize::Serialize;
 
 const MAX_FRAME_SIZE: u32 = 64*1024*1024; // 64 MB
 
-pub struct MsgpackProtocol<T: Encodable + Decodable + Debug> {
+pub struct MsgpackSerializer<T: Encodable + Decodable + Debug> {
     frame_reader: FrameReader,
     frame_writer: FrameWriter,
     phantom: PhantomData<T>
 }
 
-impl<T: Encodable + Decodable + Debug> Protocol for MsgpackProtocol<T> {
+impl<T: Encodable + Decodable + Debug> Serialize for MsgpackSerializer<T> {
     type Msg = T;
 
-    fn new() -> MsgpackProtocol<T> {
-        MsgpackProtocol {
+    fn new() -> MsgpackSerializer<T> {
+        MsgpackSerializer {
             frame_reader: FrameReader::new(MAX_FRAME_SIZE),
             frame_writer: FrameWriter::new(),
             phantom: PhantomData

@@ -27,13 +27,13 @@ mod executor_status;
 mod cluster_status;
 mod system_msg;
 mod service;
-mod handler;
+mod service_handler;
 mod correlation_id;
 mod system_envelope_handler;
 mod tcp_server_handler;
-mod connection;
-mod protocol;
-mod msgpack_protocol;
+mod connection_handler;
+mod serialize;
+mod msgpack_serializer;
 
 pub use node_id::NodeId;
 pub use node::Node;
@@ -44,13 +44,12 @@ pub use service::Service;
 pub use correlation_id::CorrelationId;
 pub use system_msg::SystemMsg;
 pub use system_envelope_handler::SystemEnvelopeHandler;
-pub use connection::{
-    Connection,
+pub use connection_handler::{
+    ConnectionHandler,
     ConnectionMsg
 };
-pub use protocol::Protocol;
-
-pub use msgpack_protocol::MsgpackProtocol;
+pub use serialize::Serialize;
+pub use msgpack_serializer::MsgpackSerializer;
 
 use std::thread::{self, JoinHandle};
 use std::sync::mpsc::channel;

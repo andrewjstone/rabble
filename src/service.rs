@@ -6,7 +6,7 @@ use pid::Pid;
 use rustc_serialize::{Encodable, Decodable};
 use executor_msg::ExecutorMsg;
 use cluster_msg::ClusterMsg;
-use handler::Handler;
+use service_handler::ServiceHandler;
 use envelope::{Envelope, SystemEnvelope};
 use node::Node;
 use errors::*;
@@ -16,7 +16,7 @@ use errors::*;
 pub struct Service<T, U, H>
     where T: Encodable + Decodable,
           U: Debug + Clone,
-          H: Handler<T, U>
+          H: ServiceHandler<T, U>
 {
     pub pid: Pid,
     request_count: usize,
@@ -30,7 +30,7 @@ pub struct Service<T, U, H>
 impl<T, U, H> Service<T, U, H>
     where T: Encodable + Decodable,
           U: Debug + Clone,
-          H: Handler<T, U>
+          H: ServiceHandler<T, U>
 {
     pub fn new(pid: Pid, node: Node<T, U>, handler: H) -> Service<T, U, H> {
         let poller = Poller::new().unwrap();

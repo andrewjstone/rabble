@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 use std::fmt::Debug;
 use rustc_serialize::{Encodable, Decodable};
-use handler::Handler;
+use service_handler::ServiceHandler;
 use envelope::SystemEnvelope;
 use node::Node;
 use errors::*;
@@ -23,7 +23,7 @@ impl<T, U> SystemEnvelopeHandler<T, U> where T: Encodable + Decodable, U: Debug 
     }
 }
 
-impl<T, U> Handler<T, U> for SystemEnvelopeHandler<T, U>
+impl<T, U> ServiceHandler<T, U> for SystemEnvelopeHandler<T, U>
     where T: Encodable + Decodable, U: Debug + Clone
 {
     fn handle_system_envelope(&mut self,

@@ -7,7 +7,7 @@ use node::Node;
 use errors::*;
 
 /// A service handler
-pub trait Handler<T: Encodable + Decodable, U: Debug + Clone> {
+pub trait ServiceHandler<T: Encodable + Decodable, U: Debug + Clone> {
     /// A callback function used to initialize the handler.
     ///
     /// The handler is expected to register any necessary timeouts or listening sockets with the
