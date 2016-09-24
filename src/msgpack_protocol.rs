@@ -5,21 +5,23 @@ use amy::{FrameReader, FrameWriter};
 use msgpack::{Encoder, Decoder};
 use rustc_serialize::{Encodable, Decodable};
 use errors::*;
-use connection::{MsgReader, MsgWriter};
+use protocol::Protocol;
 
 const MAX_FRAME_SIZE: u32 = 64*1024*1024; // 64 MB
 
-pub struct MsgpackReader<T: Encodable + Decodable> {
+pub struct MsgpackProtocol<T: Encodable + Decodable + Debug> {
     frame_reader: FrameReader,
+    frame_writer: FrameWriter,
     phantom: PhantomData<T>
 }
 
-impl<T: Encodable + Decodable> MsgReader for MsgpackReader<T> {
+impl<T: Encodable + Decodable + Debug> Protocol for MsgpackProtocol<T> {
     type Msg = T;
 
-    fn new() -> MsgpackReader<T> {
-        MsgpackReader {
+    fn new() -> MsgpackProtocol<T> {
+        MsgpackProtocol {
             frame_reader: FrameReader::new(MAX_FRAME_SIZE),
+            frame_writer: FrameWriter::new(),
             phantom: PhantomData
         }
     }
@@ -32,31 +34,17 @@ impl<T: Encodable + Decodable> MsgReader for MsgpackReader<T> {
             Ok(Some(msg))
         })
     }
-}
-
-pub struct MsgpackWriter<T: Encodable + Decodable + Debug> {
-    frame_writer: FrameWriter,
-    phantom: PhantomData<T>
-}
-
-impl<T: Encodable + Decodable + Debug> MsgWriter for MsgpackWriter<T> {
-    type Msg = T;
-
-    fn new() -> MsgpackWriter<T> {
-        MsgpackWriter {
-            frame_writer: FrameWriter::new(),
-            phantom: PhantomData
-        }
-    }
 
     fn write_msgs<U: Write>(&mut self, writer: &mut U, msg: Option<&T>) -> Result<bool> {
         if msg.is_none() {
-            return self.frame_writer.write(writer, None).chain_err(|| "Failed to write encoded message")
+            return self.frame_writer.write(writer, None)
+                .chain_err(|| "Failed to write encoded message")
         }
 
         let mut encoded = Vec::new();
         try!(msg.as_ref().unwrap().encode(&mut Encoder::new(&mut encoded))
              .chain_err(|| format!("Failed to encode message {:?}", msg)));
-        self.frame_writer.write(writer, Some(encoded)).chain_err(|| "Failed to write encoded message")
+        self.frame_writer.write(writer, Some(encoded))
+            .chain_err(|| "Failed to write encoded message")
     }
 }

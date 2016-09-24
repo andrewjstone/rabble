@@ -9,7 +9,7 @@ use errors::*;
 use handler::Handler;
 use envelope::{SystemEnvelope, Envelope};
 use node::Node;
-use connection::{ConnectionTypes, Connection, MsgWriter, MsgReader, ConnectionMsg};
+use connection::{Connection, ConnectionMsg};
 use timer_wheel::TimerWheel;
 use pid::Pid;
 use correlation_id::CorrelationId;
@@ -19,16 +19,46 @@ use executor_msg::ExecutorMsg;
 // The timer wheel expirations are accurate to within 1/TIMER_WHEEL_SLOTS of the timeout
 const TIMER_WHEEL_SLOTS: usize = 10;
 
-struct ConnectionState<C: ConnectionTypes> {
-    connection: Connection<C>,
-    timer_wheel_slot: usize
+struct ConnectionState<C: Connection> {
+    id: usize,
+    connection: C,
+    sock: TcpStream,
+    timer_wheel_slot: usize,
+    stats: ConnectionStats
+}
+
+impl<C: Connection> ConnectionState<C> {
+    pub fn new(id: usize, conn: C, sock: TcpStream, slot: usize) -> ConnectionState<C> {
+        ConnectionState {
+            id: id,
+            connection: conn,
+            sock: sock,
+            timer_wheel_slot: slot,
+            stats: ConnectionStats::new()
+        }
+    }
+}
+
+struct ConnectionStats {
+    pub total_network_msgs_sent: usize,
+    pub total_network_msgs_received: usize,
+    pub total_system_envelopes_received: usize,
+    pub total_system_requests_sent: usize
+}
+
+impl ConnectionStats {
+    pub fn new() -> ConnectionStats {
+        ConnectionStats {
+            total_network_msgs_sent: 0,
+            total_network_msgs_received: 0,
+            total_system_envelopes_received: 0,
+            total_system_requests_sent: 0
+        }
+    }
 }
 
 /// A service handler for an async TCP server
-pub struct TcpServerHandler<T, U, C>
-    where T: Encodable + Decodable,
-          U: Debug + Clone,
-          C: ConnectionTypes<Socket=TcpStream, ProcessMsg=T, SystemMsgTypeParameter=U>
+pub struct TcpServerHandler<C: Connection>
 {
     pid: Pid,
     total_connections: usize,
@@ -43,10 +73,7 @@ pub struct TcpServerHandler<T, U, C>
     request_timer_wheel: TimerWheel<CorrelationId>
 }
 
-impl <T, U, C> TcpServerHandler<T, U, C>
-    where T: Encodable + Decodable,
-          U: Debug + Clone,
-          C: ConnectionTypes<Socket=TcpStream, ProcessMsg=T, SystemMsgTypeParameter=U>
+impl <C: Connection> TcpServerHandler<C>
 {
     /// Create a new TcpServerHandler
     ///
@@ -58,7 +85,7 @@ impl <T, U, C> TcpServerHandler<T, U, C>
     pub fn new(pid: Pid,
                addr: &str,
                request_timeout: usize,
-               connection_timeout: Option<usize>) -> TcpServerHandler<T, U, C>
+               connection_timeout: Option<usize>) -> TcpServerHandler<C>
     {
         let mut connection_timer_wheel = None;
         if connection_timeout.is_some() {
@@ -85,17 +112,7 @@ impl <T, U, C> TcpServerHandler<T, U, C>
         loop {
             match self.listener.accept() {
                 Ok((socket, _)) => {
-                    try!(socket.set_nonblocking(true)
-                         .chain_err(|| "Failed to make socket nonblocking"));
-                    let id = try!(registrar.register(&socket, Event::Read)
-                                  .chain_err(|| "Failed to register accepted socket for reading"));
-                    let connection = Connection::new(self.pid.clone(), id, socket);
-                    let connection_state = ConnectionState {
-                        connection: connection,
-                        timer_wheel_slot: self.connection_timer_wheel.as_mut().map_or(0,
-                                                                           |mut tw| tw.insert(id))
-                    };
-                    self.connections.insert(id, connection_state);
+                    self.new_connection_state(socket, registrar);
                 },
                 Err(e) => {
                     if e.kind() == io::ErrorKind::WouldBlock {
@@ -107,28 +124,42 @@ impl <T, U, C> TcpServerHandler<T, U, C>
         }
     }
 
+    /// Setup a new ConnectionState object
+    ///
+    /// Make the socket nonblocking, register it for reads, and establish the connection timeout.
+    fn new_connection_state(&mut self, sock: TcpStream, registrar: &Registrar) -> Result<()> {
+        try!(sock.set_nonblocking(true).chain_err(|| "Failed to make socket nonblocking"));
+        let id = try!(registrar.register(&sock, Event::Read)
+                      .chain_err(|| "Failed to register new socket for reading"));
+        let connection = C::new(self.pid.clone(), id);
+        let slot = self.connection_timer_wheel.as_mut().map_or(0, |mut tw| tw.insert(id));
+        let connection_state = ConnectionState::new(id, connection, sock, slot);
+        self.connections.insert(id, connection_state);
+        Ok(())
+    }
+
     fn handle_connection_notification(&mut self,
                                       notification: &Notification,
-                                      node: &Node<T, U>,
+                                      node: &Node<C::ProcessMsg, C::SystemUserMsg>,
                                       registrar: &Registrar) -> Result<()>
     {
-        if let Some(connection_state) = self.connections.get_mut(&notification.id) {
+        if let Some(conn_state) = self.connections.get_mut(&notification.id) {
             let mut writable = true;
 
             if notification.event.readable() {
-                writable = try!(handle_readable(connection_state,
+                writable = try!(handle_readable(conn_state,
                                                 &mut self.request_timer_wheel,
                                                 node,
                                                 registrar));
-                update_connection_timeout(connection_state, &mut self.connection_timer_wheel);
+                update_connection_timeout(conn_state, &mut self.connection_timer_wheel);
             }
 
             if notification.event.writable() {
-                let ref mut connection = connection_state.connection;
-                writable = try!(connection.msg_writer.write_msgs(&mut connection.sock, None));
+                let ref mut connection = conn_state.connection;
+                writable = try!(connection.write_msgs(&mut conn_state.sock, None));
             }
 
-            try!(reregister(notification.id, &connection_state.connection, registrar, writable));
+            try!(reregister(notification.id, &conn_state.sock, registrar, writable));
         }
         Ok(())
     }
@@ -136,25 +167,28 @@ impl <T, U, C> TcpServerHandler<T, U, C>
     fn connection_tick(&mut self, registrar: &Registrar) {
         for id in self.connection_timer_wheel.as_mut().unwrap().expire() {
             if let Some(connection_state) = self.connections.remove(&id) {
-                let _ = registrar.deregister(connection_state.connection.sock);
+                let _ = registrar.deregister(connection_state.sock);
                 // TODO: Log connection timeout
             }
         }
     }
 
     /// Handle request timer events and see if any requests have timed out.
-    fn request_tick(&mut self, node: &Node<T, U>, registrar: &Registrar) -> Result<()> {
+    fn request_tick(&mut self,
+                    node: &Node<C::ProcessMsg, C::SystemUserMsg>,
+                    registrar: &Registrar) -> Result<()>
+    {
         for correlation_id in self.request_timer_wheel.expire() {
-            if let Some(connection_state) = self.connections.get_mut(&correlation_id.connection) {
+            if let Some(mut connection_state) = self.connections.get_mut(&correlation_id.connection) {
                 let envelope = SystemEnvelope {
                     from: self.pid.clone(),
                     to: self.pid.clone(),
                     msg: SystemMsg::Timeout(correlation_id.clone()),
                     correlation_id: None
                 };
-                try!(run_system_envelope_callback(envelope,
+                try!(run_handle_system_envelope(envelope,
                                                   correlation_id.connection,
-                                                  &mut connection_state.connection,
+                                                  &mut connection_state,
                                                   node,
                                                   &mut self.request_timer_wheel,
                                                   registrar));
@@ -164,13 +198,16 @@ impl <T, U, C> TcpServerHandler<T, U, C>
     }
 }
 
-impl<T, U, C> Handler<T, U> for TcpServerHandler<T, U, C>
-  where T: Encodable + Decodable,
-        U: Debug + Clone,
-        C: ConnectionTypes<Socket=TcpStream, ProcessMsg=T, SystemMsgTypeParameter=U>
+type Node2<C: Connection> = Node<C::ProcessMsg, C::SystemUserMsg>;
+
+impl<C> Handler<C::ProcessMsg, C::SystemUserMsg> for TcpServerHandler<C>
+  where C: Connection,
 {
     /// Initialize the state of the handler: Register timers and tcp listen socket
-    fn init(&mut self, registrar: &Registrar, node: &Node<T, U>) -> Result<()> {
+    fn init(&mut self,
+            registrar: &Registrar,
+            node: &Node<C::ProcessMsg,  C::SystemUserMsg>) -> Result<()>
+    {
         self.listener_id = try!(registrar.register(&self.listener, Event::Read)
                                 .chain_err(|| "Failed to register listener"));
 
@@ -188,7 +225,7 @@ impl<T, U, C> Handler<T, U> for TcpServerHandler<T, U, C>
 
     /// Handle any poll notifications
     fn handle_notification(&mut self,
-                           node: &Node<T, U>,
+                           node: &Node2<C>,
                            notification: Notification,
                            registrar: &Registrar) -> Result<()>
     {
@@ -210,7 +247,7 @@ impl<T, U, C> Handler<T, U> for TcpServerHandler<T, U, C>
         if let Err(e) = self.handle_connection_notification(&notification, &node, &registrar) {
             // Unwrap is correct here since the above call only fails if the connection exists
             let connection_state = self.connections.remove(&notification.id).unwrap();
-            let _ = registrar.deregister(connection_state.connection.sock);
+            let _ = registrar.deregister(connection_state.sock);
             return Err(e);
         }
         Ok (())
@@ -219,8 +256,8 @@ impl<T, U, C> Handler<T, U> for TcpServerHandler<T, U, C>
 
     /// Handle a system envelope from a process or system thread
     fn handle_system_envelope(&mut self,
-                              node: &Node<T, U>,
-                              envelope: SystemEnvelope<U>,
+                              node: &Node2<C>,
+                              envelope: SystemEnvelope<C::SystemUserMsg>,
                               registrar: &Registrar) -> Result<()>
     {
         if envelope.correlation_id.is_none() {
@@ -228,13 +265,13 @@ impl<T, U, C> Handler<T, U> for TcpServerHandler<T, U, C>
         }
         // Don't bother cancelling request timers... Just ignore the timeouts in the connection if
         // the request has already received its reply
-        if let Some(connection_state) =
+        if let Some(mut connection_state) =
             self.connections.get_mut(&envelope.correlation_id.as_ref().unwrap().connection)
         {
             let correlation_id = envelope.correlation_id.as_ref().unwrap().clone();
-            try!(run_system_envelope_callback(envelope,
+            try!(run_handle_system_envelope(envelope,
                                               correlation_id.connection,
-                                              &mut connection_state.connection,
+                                              &mut connection_state,
                                               node,
                                               &mut self.request_timer_wheel,
                                               registrar));
@@ -244,50 +281,44 @@ impl<T, U, C> Handler<T, U> for TcpServerHandler<T, U, C>
 }
 
 /// Handle any readable notifications. Returns whether the socket is still writable.
-fn handle_readable<T, U, C>(connection_state: &mut ConnectionState<C>,
-                            request_timer_wheel: &mut TimerWheel<CorrelationId>,
-                            node: &Node<T, U>,
-                            registrar: &Registrar) -> Result<bool>
-    where T: Encodable + Decodable,
-          U: Debug + Clone,
-          C: ConnectionTypes<Socket=TcpStream, ProcessMsg=T, SystemMsgTypeParameter=U>
+fn handle_readable<C>(conn_state: &mut ConnectionState<C>,
+                      request_timer_wheel: &mut TimerWheel<CorrelationId>,
+                      node: &Node<C::ProcessMsg, C::SystemUserMsg>,
+                      registrar: &Registrar) -> Result<bool>
+    where C: Connection
 {
     let mut writable = true;
-    let ref mut connection = connection_state.connection;
-    while let Some(msg) = try!(connection.msg_reader.read_msg(&mut connection.sock)) {
-        let f = connection.network_msg_callback;
-        let responses = f(&mut connection.state, msg);
+    while let Some(msg) = try!(conn_state.connection.read_msg(&mut conn_state.sock)) {
+        let responses = conn_state.connection.handle_network_msg(msg);
         let writable = try!(handle_connection_msgs(request_timer_wheel,
                                                    responses,
-                                                   connection,
+                                                   conn_state,
                                                    node));
     }
     Ok(writable)
 }
 
 /// Reregister a socket for an existing connection
-fn reregister<C: ConnectionTypes>(id: usize,
-                                  connection: &Connection<C>,
-                                  registrar: &Registrar,
-                                  writable: bool) -> Result<()>
+fn reregister(id: usize, sock: &TcpStream, registrar: &Registrar, writable: bool) -> Result<()>
 {
     if !writable {
-        return registrar.reregister(id, &connection.sock, Event::Both)
+        return registrar.reregister(id, sock, Event::Both)
             .chain_err(|| "Failed to reregister socket for read and write events");
     } else {
-        return registrar.reregister(id, &connection.sock, Event::Read)
+        return registrar.reregister(id, sock, Event::Read)
             .chain_err(|| "Failed to reregister socket for read events");
     }
 }
 
+/// A new message has been received on a connection. Reset the timer.
 fn update_connection_timeout<C>(connection_state: &mut ConnectionState<C>,
                                 timer_wheel: &mut Option<TimerWheel<usize>>)
-    where C: ConnectionTypes
+    where C: Connection
 {
     if timer_wheel.is_none() { return; }
     let mut timer_wheel = timer_wheel.as_mut().unwrap();
-    timer_wheel.remove(&connection_state.connection.id, connection_state.timer_wheel_slot);
-    connection_state.timer_wheel_slot = timer_wheel.insert(connection_state.connection.id);
+    timer_wheel.remove(&connection_state.id, connection_state.timer_wheel_slot);
+    connection_state.timer_wheel_slot = timer_wheel.insert(connection_state.id);
 }
 
 /// Send client replies and route envelopes
@@ -295,12 +326,10 @@ fn update_connection_timeout<C>(connection_state: &mut ConnectionState<C>,
 /// For any envelopes with correlation ids, record them in the request timer wheel.
 /// Return whether the connection is writable or not
 fn handle_connection_msgs<C>(request_timer_wheel: &mut TimerWheel<CorrelationId>,
-                             msgs: Vec<ConnectionMsg<C::ProcessMsg,
-                                                     C::SystemMsgTypeParameter,
-                                                     C::ClientMsg>>,
-                             connection: &mut Connection<C>,
-                             node: &Node<C::ProcessMsg, C::SystemMsgTypeParameter>)
-    -> Result<(bool)> where C: ConnectionTypes
+                             msgs: Vec<ConnectionMsg<C>>,
+                             conn_state: &mut ConnectionState<C>,
+                             node: &Node<C::ProcessMsg, C::SystemUserMsg>)
+    -> Result<(bool)> where C: Connection
 {
     let mut writable = true;
     for m in msgs {
@@ -318,8 +347,9 @@ fn handle_connection_msgs<C>(request_timer_wheel: &mut TimerWheel<CorrelationId>
                 node.send(ExecutorMsg::User(Envelope::System(se)));
             },
             ConnectionMsg::ClientMsg(client_msg, correlation_id) => {
+                let ref mut connection = conn_state.connection;
                 // Respond to the client
-                writable = try!(connection.msg_writer.write_msgs(&mut connection.sock,
+                writable = try!(connection.write_msgs(&mut conn_state.sock,
                                                                  Some(&client_msg))
                                 .chain_err(|| format!("Failed to write client msg: {:?}",
                                                       client_msg)));
@@ -329,24 +359,23 @@ fn handle_connection_msgs<C>(request_timer_wheel: &mut TimerWheel<CorrelationId>
     Ok(writable)
 }
 
-fn run_system_envelope_callback<C>(envelope: SystemEnvelope<C::SystemMsgTypeParameter>,
+fn run_handle_system_envelope<C>(envelope: SystemEnvelope<C::SystemUserMsg>,
                                    connection_id: usize,
-                                   connection: &mut Connection<C>,
-                                   node: &Node<C::ProcessMsg, C::SystemMsgTypeParameter>,
+                                   conn_state: &mut ConnectionState<C>,
+                                   node: &Node<C::ProcessMsg, C::SystemUserMsg>,
                                    request_timer_wheel: &mut TimerWheel<CorrelationId>,
                                    registrar: &Registrar)
-    -> Result<()> where C: ConnectionTypes
+    -> Result<()> where C: Connection
 {
-    let f = connection.system_envelope_callback;
-    let responses = f(&mut connection.state, envelope);
+    let responses = conn_state.connection.handle_system_envelope(envelope);
     let writable = try!(handle_connection_msgs(request_timer_wheel,
                                                responses,
-                                               connection,
+                                               conn_state,
                                                node));
     if !writable {
-        try!(registrar.reregister(connection_id, &connection.sock, Event::Both)
+        try!(registrar.reregister(connection_id, &conn_state.sock, Event::Both)
              .chain_err(|| "Failed to reregister socket for read and write events \
-                            during run_system_envelope_callback()"));
+                            during run_handle_system_envelope()"));
     }
     Ok(())
 }
