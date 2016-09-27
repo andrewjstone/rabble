@@ -20,6 +20,7 @@ pub struct Service<T, U, H>
 {
     pub pid: Pid,
     request_count: usize,
+    pub tx: amy::Sender<SystemEnvelope<U>>,
     rx: amy::Receiver<SystemEnvelope<U>>,
     node: Node<T, U>,
     poller: Poller,
@@ -32,35 +33,46 @@ impl<T, U, H> Service<T, U, H>
           U: Debug + Clone,
           H: ServiceHandler<T, U>
 {
-    pub fn new(pid: Pid, node: Node<T, U>, handler: H) -> Service<T, U, H> {
+    pub fn new(pid: Pid, node: Node<T, U>, mut handler: H) -> Result<Service<T, U, H>> {
         let poller = Poller::new().unwrap();
         let registrar = poller.get_registrar();
         let (tx, rx) = registrar.channel().unwrap();
-        let msg = ExecutorMsg::RegisterSystemThread(pid.clone(), tx);
-        node.send(msg).unwrap();
-        Service {
+        let msg = ExecutorMsg::RegisterSystemThread(pid.clone(), tx.clone());
+        if let Err(_) = node.send(msg) {
+            return Err(format!("Failed to send system thread registration from {}", pid).into());
+        }
+        try!(handler.init(&registrar, &node));
+        Ok(Service {
             pid: pid,
             request_count: 0,
+            tx: tx,
             rx: rx,
             node: node,
             poller: poller,
             registrar: registrar,
             handler: handler
-        }
+        })
     }
 
     pub fn wait(&mut self) {
-        // TODO: Configurable timeout?
-        for notification in self.poller.wait(1000).unwrap() {
-            if notification.id == self.rx.get_id() {
-                if let Err(e) = self.handle_system_envelopes() {
-                    // TODO: Log error
-                }
-            } else {
-                if let Err(e) = self.handler.handle_notification(&self.node,
-                                                                 notification,
-                                                                 &self.registrar) {
-                    //TODO: Log error
+        loop {
+            // TODO: Configurable timeout?
+            for notification in self.poller.wait(1000).unwrap() {
+                if notification.id == self.rx.get_id() {
+                    if let Err(e) = self.handle_system_envelopes() {
+                        if let ErrorKind::Shutdown(_) = *e.kind() {
+                            // TODO: Log shutdown
+                            println!("Service {}", e);
+                            return;
+                        }
+                        // TODO: Log error
+                    }
+                } else {
+                    if let Err(e) = self.handler.handle_notification(&self.node,
+                                                                     notification,
+                                                                     &self.registrar) {
+                        //TODO: Log error
+                    }
                 }
             }
         }
@@ -68,6 +80,9 @@ impl<T, U, H> Service<T, U, H>
 
     pub fn handle_system_envelopes(&mut self) -> Result<()> {
         while let Ok(envelope) = self.rx.try_recv() {
+            if envelope.contains_shutdown_msg() {
+                return Err(ErrorKind::Shutdown(self.pid.clone()).into());
+            }
             try!(self.handler.handle_system_envelope(&self.node, envelope, &self.registrar));
         }
         Ok(())

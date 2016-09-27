@@ -1,10 +1,16 @@
+use std::fmt::Debug;
 use rustc_serialize::{Encodable, Decodable};
 use pid::Pid;
 use envelope::Envelope;
 use correlation_id::CorrelationId;
 
-pub trait Process<T: Encodable + Decodable, U> : Send {
-    fn handle(&mut self, msg: T,
+pub trait Process : Send {
+    type Msg: Encodable + Decodable;
+    type SystemUserMsg: Debug;
+
+    fn handle(&mut self,
+              msg: Self::Msg,
               from: Pid,
-              correlation_id: Option<CorrelationId>) -> &mut Vec<Envelope<T, U>>;
+              correlation_id: Option<CorrelationId>)
+        -> &mut Vec<Envelope<Self::Msg, Self::SystemUserMsg>>;
 }

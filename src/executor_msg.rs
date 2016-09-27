@@ -7,9 +7,10 @@ use correlation_id::CorrelationId;
 use amy;
 
 pub enum ExecutorMsg<T: Encodable + Decodable, U> {
-    Start(Pid, Box<Process<T, U>>),
+    Start(Pid, Box<Process<Msg=T, SystemUserMsg=U>>),
     Stop(Pid),
     User(Envelope<T, U>),
     RegisterSystemThread(Pid, amy::Sender<SystemEnvelope<U>>),
-    GetStatus(Pid, Option<CorrelationId>)
+    GetStatus(Pid, Option<CorrelationId>),
+    Shutdown
 }

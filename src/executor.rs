@@ -16,7 +16,7 @@ use amy;
 pub struct Executor<T: Encodable + Decodable + Send, U: Debug> {
     pid: Pid,
     node: NodeId,
-    processes: HashMap<Pid, Box<Process<T, U>>>,
+    processes: HashMap<Pid, Box<Process<Msg=T, SystemUserMsg=U>>>,
     system_senders: HashMap<Pid, amy::Sender<SystemEnvelope<U>>>,
     tx: Sender<ExecutorMsg<T, U>>,
     rx: Receiver<ExecutorMsg<T, U>>,
@@ -57,7 +57,10 @@ impl<T: Encodable + Decodable + Send, U: Debug> Executor<T, U> {
                     self.system_senders.insert(pid, tx);
                 },
                 ExecutorMsg::GetStatus(pid, correlation_id) =>
-                    self.get_status(pid, correlation_id)
+                    self.get_status(pid, correlation_id),
+
+                // Just return so the thread exits. This will trigger the cluster server to shutdown
+                Shutdown => return
             }
         }
     }
@@ -76,7 +79,8 @@ impl<T: Encodable + Decodable + Send, U: Debug> Executor<T, U> {
         self.route_to_thread(envelope);
     }
 
-    fn start(&mut self, pid: Pid, process: Box<Process<T, U>>) {
+    fn start(&mut self, pid: Pid, process: Box<Process<Msg=T, SystemUserMsg=U>>) {
+        println!("Executor starting process {}", pid);
         self.processes.insert(pid, process);
     }
 

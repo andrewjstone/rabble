@@ -6,6 +6,7 @@ use correlation_id::CorrelationId;
 pub enum SystemMsg<U> {
     ClusterStatus(ClusterStatus),
     ExecutorStatus(ExecutorStatus),
-    Timeout(CorrelationId),
-    User(U)
+    Timeout,
+    User(U),
+    Shutdown
 }

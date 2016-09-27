@@ -17,9 +17,9 @@ pub trait ConnectionHandler : Sized {
     fn new(pid: Pid, id: usize) -> Self;
 
     fn handle_system_envelope(&mut self,
-                              SystemEnvelope<Self::SystemUserMsg>) -> Vec<ConnectionMsg<Self>>;
+                              SystemEnvelope<Self::SystemUserMsg>) -> &mut Vec<ConnectionMsg<Self>>;
 
-    fn handle_network_msg(&mut self, Self::ClientMsg) -> Vec<ConnectionMsg<Self>>;
+    fn handle_network_msg(&mut self, Self::ClientMsg) -> &mut Vec<ConnectionMsg<Self>>;
 }
 
 /// Connection messages are returned from the callback functions for a Connection.
@@ -30,5 +30,5 @@ pub trait ConnectionHandler : Sized {
 pub enum ConnectionMsg<C: ConnectionHandler>
 {
     Envelope(Envelope<C::ProcessMsg, C::SystemUserMsg>),
-    ClientMsg(C::ClientMsg, CorrelationId)
+    Client(C::ClientMsg, CorrelationId)
 }

@@ -39,7 +39,11 @@ pub use node_id::NodeId;
 pub use node::Node;
 pub use pid::Pid;
 pub use process::Process;
-pub use envelope::Envelope;
+pub use envelope::{
+    Envelope,
+    SystemEnvelope,
+    ProcessEnvelope
+};
 pub use service::Service;
 pub use correlation_id::CorrelationId;
 pub use system_msg::SystemMsg;
@@ -50,6 +54,7 @@ pub use connection_handler::{
 };
 pub use serialize::Serialize;
 pub use msgpack_serializer::MsgpackSerializer;
+pub use tcp_server_handler::TcpServerHandler;
 
 use std::thread::{self, JoinHandle};
 use std::sync::mpsc::channel;

@@ -30,7 +30,8 @@ impl<T: Encodable + Decodable + Debug> Serialize for MsgpackSerializer<T> {
         try!(self.frame_reader.read(reader).chain_err(|| "Failed to read from socket"));
         self.frame_reader.iter_mut().next().map_or(Ok(None), |frame| {
             let mut decoder = Decoder::new(&frame[..]);
-            let msg = try!(Decodable::decode(&mut decoder).chain_err(|| "Failed to decode msgpack frame"));
+            let msg = try!(Decodable::decode(&mut decoder)
+                           .chain_err(|| "Failed to decode msgpack frame"));
             Ok(Some(msg))
         })
     }

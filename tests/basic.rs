@@ -29,7 +29,7 @@ fn single_service_and_handler_get_executor_status() {
         assert_eq!(envelope.to, pid);
         assert_matches!(envelope.msg, SystemMsg::ExecutorStatus(_));
     });
-    let mut service = Service::new(pid2.clone(), node.clone(), handler);
+    let mut service = Service::new(pid2.clone(), node.clone(), handler).unwrap();
     node.executor_status(pid2, None).unwrap();
     thread::spawn(move || {
         service.wait();

@@ -6,6 +6,7 @@ use executor_msg::ExecutorMsg;
 use cluster_msg::ClusterMsg;
 use pid::Pid;
 use correlation_id::CorrelationId;
+use process::Process;
 
 #[derive(Clone)]
 pub struct Node<T: Encodable + Decodable, U: Debug + Clone> {
@@ -25,6 +26,12 @@ impl<T: Encodable + Decodable, U: Debug + Clone> Node<T, U> {
         }
     }
 
+    pub fn spawn(&self, pid: Pid, process: Box<Process<Msg=T, SystemUserMsg=U>>)
+        -> Result<(), SendError<ExecutorMsg<T, U>>>
+    {
+        self.send(ExecutorMsg::Start(pid, process))
+    }
+
     pub fn send(&self, msg: ExecutorMsg<T, U>) -> Result<(), SendError<ExecutorMsg<T, U>>> {
         self.executor_tx.send(msg)
     }
@@ -39,5 +46,11 @@ impl<T: Encodable + Decodable, U: Debug + Clone> Node<T, U> {
         -> Result<(), SendError<ClusterMsg<T>>>
     {
         self.cluster_tx.send(ClusterMsg::GetStatus(from, correlation_id))
+    }
+
+    /// Shutdown the node
+    pub fn shutdown(&self) {
+        self.send(ExecutorMsg::Shutdown);
+        self.cluster_tx.send(ClusterMsg::Shutdown);
     }
 }

@@ -19,6 +19,16 @@ pub struct SystemEnvelope<T> {
     pub correlation_id: Option<CorrelationId>
 }
 
+impl<T> SystemEnvelope<T> {
+    pub fn contains_shutdown_msg(&self) -> bool {
+        let SystemEnvelope {ref msg, ..} = *self;
+        if let SystemMsg::Shutdown = *msg {
+            return true;
+        }
+        false
+    }
+}
+
 /// Envelopes sent to lightweight processes.
 ///
 /// These are routable between nodes and therefore required to implement RustcEncodable and

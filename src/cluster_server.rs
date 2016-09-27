@@ -102,7 +102,8 @@ impl<T: Encodable + Decodable, U> ClusterServer<T, U> {
                     self.handle_poll_notifications(notifications),
                 ClusterMsg::Join(node) => self.join(node),
                 ClusterMsg::User(envelope) => self.send_remote(envelope),
-                ClusterMsg::GetStatus(pid, correlation_id) => self.get_status(pid, correlation_id)
+                ClusterMsg::GetStatus(pid, correlation_id) => self.get_status(pid, correlation_id),
+                ClusterMsg::Shutdown => return
             }
         }
     }
