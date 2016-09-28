@@ -271,7 +271,7 @@ fn spawn_replicas(node: &Node<ProcessMsg, SystemUserMsg>, pids: &Vec<Pid>) {
         };
 
         let replica = Box::new(Replica::new(pids[i].clone(), next));
-        node.spawn(pids[i].clone(), replica).unwrap();
+        node.spawn(&pids[i], replica).unwrap();
     }
 }
 

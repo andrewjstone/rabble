@@ -9,6 +9,10 @@ error_chain! {
     }
 
     errors {
+        SendError(msg: String) {
+            description("failed to send")
+            display("failed to send {}", msg)
+        }
         Shutdown(pid: Pid) {
             description("shutting down")
             display("shutting down {}", pid)

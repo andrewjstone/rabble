@@ -14,7 +14,6 @@ use timer_wheel::TimerWheel;
 use pid::Pid;
 use correlation_id::CorrelationId;
 use system_msg::SystemMsg;
-use executor_msg::ExecutorMsg;
 use serialize::Serialize;
 
 type Node<C: ConnectionHandler> = node::Node<C::ProcessMsg, C::SystemUserMsg>;
@@ -368,13 +367,13 @@ fn handle_connection_msgs<C, S>(request_timer_wheel: &mut TimerWheel<Correlation
                 if pe.correlation_id.is_some() {
                     request_timer_wheel.insert(pe.correlation_id.as_ref().unwrap().clone());
                 }
-                node.send(ExecutorMsg::User(Envelope::Process(pe)));
+                node.send(Envelope::Process(pe));
             },
             ConnectionMsg::Envelope(Envelope::System(se))  => {
                 if se.correlation_id.is_some() {
                     request_timer_wheel.insert(se.correlation_id.as_ref().unwrap().clone());
                 }
-                node.send(ExecutorMsg::User(Envelope::System(se)));
+                node.send(Envelope::System(se));
             },
             ConnectionMsg::Client(client_msg, correlation_id) => {
                 // Respond to the client

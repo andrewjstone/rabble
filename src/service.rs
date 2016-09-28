@@ -4,7 +4,6 @@ use std::fmt::Debug;
 use amy::{self, Poller, Registrar, Notification};
 use pid::Pid;
 use rustc_serialize::{Encodable, Decodable};
-use executor_msg::ExecutorMsg;
 use cluster_msg::ClusterMsg;
 use service_handler::ServiceHandler;
 use envelope::{Envelope, SystemEnvelope};
@@ -37,10 +36,7 @@ impl<T, U, H> Service<T, U, H>
         let poller = Poller::new().unwrap();
         let registrar = poller.get_registrar();
         let (tx, rx) = registrar.channel().unwrap();
-        let msg = ExecutorMsg::RegisterSystemThread(pid.clone(), tx.clone());
-        if let Err(_) = node.send(msg) {
-            return Err(format!("Failed to send system thread registration from {}", pid).into());
-        }
+        try!(node.register_system_thread(&pid, &tx));
         try!(handler.init(&registrar, &node));
         Ok(Service {
             pid: pid,
