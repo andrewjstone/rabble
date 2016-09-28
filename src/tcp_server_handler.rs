@@ -136,9 +136,11 @@ impl <C,S> TcpServerHandler<C, S>
                 },
                 Err(e) => {
                     if e.kind() == io::ErrorKind::WouldBlock {
-                        return Ok(());
+                        return registrar.reregister(self.listener_id, &self.listener, Event::Read)
+                            .chain_err(|| "Failed to reregister listen socket for read events");
                     }
                     println!("Accept error {}", e);
+                    // TODO: Panic?
                     return Err(e.into())
                 }
             }
@@ -167,16 +169,18 @@ impl <C,S> TcpServerHandler<C, S>
         if let Some(connection) = self.connections.get_mut(&notification.id) {
             let mut writable = true;
 
+            if notification.event.writable() {
+                // Notify the serializer that the socket is writable again
+                connection.serializer.set_writable();
+                writable = try!(connection.serializer.write_msgs(&mut connection.sock, None));
+            }
+
             if notification.event.readable() {
                 writable = try!(handle_readable(connection,
                                                 &mut self.request_timer_wheel,
                                                 node,
                                                 registrar));
                 update_connection_timeout(connection, &mut self.connection_timer_wheel);
-            }
-
-            if notification.event.writable() {
-                writable = try!(connection.serializer.write_msgs(&mut connection.sock, None));
             }
 
             try!(reregister(notification.id, &connection.sock, registrar, writable));
@@ -377,7 +381,6 @@ fn handle_connection_msgs<C, S>(request_timer_wheel: &mut TimerWheel<Correlation
                 writable = try!(serializer.write_msgs(sock, Some(&client_msg))
                                 .chain_err(|| format!("Failed to write client msg: {:?}",
                                                       client_msg)));
-                println!("Got a client response: writable = {}", writable);
             }
         }
     }

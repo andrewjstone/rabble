@@ -2,6 +2,7 @@ use std::sync::mpsc::{Sender, Receiver};
 use std::collections::{HashMap, HashSet};
 use std::net::{TcpListener, TcpStream};
 use std::io::{self, Error, ErrorKind};
+use std::fmt::Debug;
 use net2::{TcpBuilder, TcpStreamExt};
 use rustc_serialize::{Encodable, Decodable};
 use msgpack::{Encoder, Decoder};
@@ -48,7 +49,7 @@ impl Conn {
 
 /// A struct that handles cluster membership connection and routing of messages to processes on
 /// other nodes.
-pub struct ClusterServer<T: Encodable + Decodable, U> {
+pub struct ClusterServer<T: Encodable + Decodable, U: Debug> {
     pid: Pid,
     node: NodeId,
     rx: Receiver<ClusterMsg<T>>,
@@ -63,7 +64,7 @@ pub struct ClusterServer<T: Encodable + Decodable, U> {
     registrar: Registrar
 }
 
-impl<T: Encodable + Decodable, U> ClusterServer<T, U> {
+impl<T: Encodable + Decodable, U: Debug> ClusterServer<T, U> {
     pub fn new(node: NodeId,
                rx: Receiver<ClusterMsg<T>>,
                executor_tx: Sender<ExecutorMsg<T, U>>,

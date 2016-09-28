@@ -65,6 +65,7 @@ impl<T, U, H> Service<T, U, H>
                             println!("Service {}", e);
                             return;
                         }
+                        println!("ERROR HANDLING SSYSTEM ENVELOPE {:?}", e);
                         // TODO: Log error
                     }
                 } else {

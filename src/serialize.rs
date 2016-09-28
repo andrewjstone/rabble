@@ -27,5 +27,18 @@ pub trait Serialize {
     fn read_msg<T: Read>(&mut self, reader: &mut T) -> Result<Option<Self::Msg>>;
 
     /// Write out as much pending data as possible. Append `msg` to the pending data if not `None`.
+    /// If this function returns `Ok(false)` the writer is no longer writable (EAGAIN/EWOULDBLOCK)
+    /// and needs to be reregistered with the poller.
     fn write_msgs<T: Write>(&mut self, writer: &mut T, msg: Option<&Self::Msg>) -> Result<bool>;
+
+    /// As an optimization to prevent unnecessary write system calls, the serializer should keep
+    /// track of whether the writer is writable or not. The serializer will automatically be set to
+    /// unwritable if `write_msgs` returns `Ok(false)`. In this case the writer should be
+    /// reregistered with the poller. When the poller fires and lets us know that the writer is
+    /// writable again, we should call this function to inform the serializer so that it will
+    /// attempt to write to the writer and not just buffer the request.
+    fn set_writable(&mut self);
+
+    /// Tell us whether or not the serializer believes the associated writer is writable or not.
+    fn is_writable(&self) -> bool;
 }

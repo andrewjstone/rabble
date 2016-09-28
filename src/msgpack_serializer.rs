@@ -48,4 +48,12 @@ impl<T: Encodable + Decodable + Debug> Serialize for MsgpackSerializer<T> {
         self.frame_writer.write(writer, Some(encoded))
             .chain_err(|| "Failed to write encoded message")
     }
+
+    fn set_writable(&mut self) {
+        self.frame_writer.writable();
+    }
+
+    fn is_writable(&self) -> bool {
+        self.frame_writer.is_writable()
+    }
 }

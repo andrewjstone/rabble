@@ -1,12 +1,14 @@
+extern crate amy;
 extern crate rabble;
 #[macro_use]
 extern crate assert_matches;
 extern crate rustc_serialize;
 
 use std::{thread, time};
+use std::thread::JoinHandle;
 use std::net::TcpStream;
-use std::io::Read;
 use std::str;
+use amy::Sender;
 
 use rabble::{
     Pid,
@@ -22,7 +24,8 @@ use rabble::{
     ConnectionHandler,
     ConnectionMsg,
     MsgpackSerializer,
-    Serialize
+    Serialize,
+    Node
 };
 
 // Messages sent to processes
@@ -74,20 +77,18 @@ impl Process for Replica {
 
     fn handle(&mut self,
               msg: ProcessMsg,
-              from: Pid,
+              _from: Pid,
               correlation_id: Option<CorrelationId>)
         -> &mut Vec<Envelope<ProcessMsg, SystemUserMsg>>
     {
         match msg {
             ProcessMsg::Op(val) => {
-                self.history.push(val);
                 let reply = Envelope::System(SystemEnvelope {
                     to: correlation_id.as_ref().unwrap().pid.clone(),
                     from: self.pid.clone(),
                     msg: SystemMsg::User(SystemUserMsg::OpComplete),
                     correlation_id: correlation_id.clone()
                 });
-                println!("Replica {} got op from {}", self.pid, from);
                 // If there is no next pid send the reply to the original caller in the correlation
                 // id. Otherwise forward to the next process in the chain.
                 let envelope = self.next.as_ref().map_or(reply, |to| {
@@ -139,7 +140,6 @@ impl ConnectionHandler for ApiServerConnectionHandler {
     fn handle_system_envelope(&mut self, envelope: SystemEnvelope<SystemUserMsg>)
         -> &mut Vec<ConnectionMsg<ApiServerConnectionHandler>>
     {
-        println!("{:?}", envelope);
         let SystemEnvelope {msg, correlation_id, ..} = envelope;
         let correlation_id = correlation_id.unwrap();
         match msg {
@@ -159,10 +159,11 @@ impl ConnectionHandler for ApiServerConnectionHandler {
     {
         match msg {
             ClientMsg::Op(pid, val) => {
-                println!("Api server got message for {}", pid);
                 self.push_new_process_envelope(pid, ProcessMsg::Op(val));
             },
-            ClientMsg::GetHistory(pid) => self.push_new_process_envelope(pid, ProcessMsg::GetHistory),
+            ClientMsg::GetHistory(pid) => {
+                self.push_new_process_envelope(pid, ProcessMsg::GetHistory);
+            }
 
             // We only handle client requests. Client replies come in as SystemEnvelopes
             _ => unreachable!()
@@ -185,19 +186,52 @@ impl ApiServerConnectionHandler {
     }
 }
 
+const API_SERVER_IP: &'static str  = "127.0.0.1:12001";
+
 #[test]
 fn chain_replication() {
     let node_id = NodeId {name: "node1".to_string(), addr: "127.0.0.1:11001".to_string()};
     let test_pid = Pid { name: "test-runner".to_string(), group: None, node: node_id.clone()};
     let (node, mut handles) = rabble::rouse::<ProcessMsg, SystemUserMsg>(node_id);
-    let pids: Vec<Pid> = ["replica1", "replica2", "replica3"].iter().map(|name| {
-        Pid {
-            name: name.to_string(),
-            group: None,
-            node: node.id.clone()
-        }
-    }).collect();
 
+    let pids = create_replica_pids(&node.id);
+
+    let (service_pid, service_tx, service_handle) = start_tcp_server_service(node.clone());
+    handles.push(service_handle);
+
+    spawn_replicas(&node, &pids);
+
+    run_client_operations(&pids);
+
+    verify_histories(&pids);
+
+    shutdown(node, test_pid, service_pid, service_tx);
+
+    for h in handles {
+        h.join().unwrap();
+    }
+
+}
+
+fn shutdown(node: Node<ProcessMsg, SystemUserMsg>,
+            test_pid: Pid,
+            service_pid: Pid,
+            service_tx: Sender<SystemEnvelope<SystemUserMsg>>)
+{
+    let shutdown_envelope = SystemEnvelope {
+        to: service_pid,
+        from: test_pid,
+        msg: SystemMsg::Shutdown,
+        correlation_id: None
+    };
+    service_tx.send(shutdown_envelope).unwrap();
+    node.shutdown();
+
+}
+
+fn start_tcp_server_service(node: Node<ProcessMsg, SystemUserMsg>)
+-> (Pid, Sender<SystemEnvelope<SystemUserMsg>>, JoinHandle<()>)
+{
     let server_pid = Pid {
         name: "api-server".to_string(),
         group: None,
@@ -206,15 +240,28 @@ fn chain_replication() {
 
     // Start the API tcp server
     let handler: TcpServerHandler<ApiServerConnectionHandler, MsgpackSerializer<ClientMsg>> =
-        TcpServerHandler::new(server_pid.clone(), "127.0.0.1:12001", 5000, None);
-    let mut service = Service::new(server_pid, node.clone(), handler).unwrap();
+        TcpServerHandler::new(server_pid.clone(), API_SERVER_IP, 5000, None);
+    let mut service = Service::new(server_pid, node, handler).unwrap();
     let service_tx = service.tx.clone();
     let service_pid = service.pid.clone();
     let h = thread::spawn(move || {
         service.wait();
     });
-    handles.push(h);
+    (service_pid, service_tx, h)
+}
 
+
+fn create_replica_pids(node_id: &NodeId) -> Vec<Pid> {
+    ["replica1", "replica2", "replica3"].iter().map(|name| {
+        Pid {
+            name: name.to_string(),
+            group: None,
+            node: node_id.clone()
+        }
+    }).collect()
+}
+
+fn spawn_replicas(node: &Node<ProcessMsg, SystemUserMsg>, pids: &Vec<Pid>) {
     // Launch the three replicas participating in chain replication
     for i in 0..pids.len() {
         let next = if i == pids.len() - 1 {
@@ -226,21 +273,34 @@ fn chain_replication() {
         let replica = Box::new(Replica::new(pids[i].clone(), next));
         node.spawn(pids[i].clone(), replica).unwrap();
     }
+}
 
-
-    // launch 3 clients and send operations to the head of the chain
+/// launch 3 clients and send concurrent operations to the head of the chain
+fn run_client_operations(pids: &Vec<Pid>) {
     let mut client_handles = Vec::new();
     for i in 0..3 {
         let pids = pids.clone();
         let h = thread::spawn(move || {
-            let mut sock = TcpStream::connect("127.0.0.1:12001").unwrap();
+            let mut sock = TcpStream::connect(API_SERVER_IP).unwrap();
             let mut serializer = MsgpackSerializer::new();
-            assert_matches!(serializer.write_msgs(&mut sock, Some(&ClientMsg::Op(pids[0].clone(), i))),
+            assert_matches!(serializer.write_msgs(&mut sock,
+                                                  Some(&ClientMsg::Op(pids[0].clone(), i))),
                             Ok(true));
-            sock.set_nonblocking(true);
-            thread::sleep(time::Duration::from_millis(1000));
-            let res = serializer.read_msg(&mut sock);
-            println!("res = {:?}", res);
+            sock.set_nonblocking(true).unwrap();
+            loop {
+                thread::sleep(time::Duration::from_millis(10));
+                match serializer.read_msg(&mut sock) {
+                    Ok(None) => (),
+                    Ok(Some(reply)) => {
+                        assert_eq!(ClientMsg::OpComplete, reply);
+                        break;
+                    },
+                    Err(e) => {
+                        println!("{}", e);
+                        assert!(false)
+                    }
+                }
+            }
         });
         client_handles.push(h);
     }
@@ -248,20 +308,45 @@ fn chain_replication() {
     for h in client_handles {
         h.join().unwrap();
     }
-    println!("before shutdown");
-
-    let shutdown_envelope = SystemEnvelope {
-        to: service_pid,
-        from: test_pid,
-        msg: SystemMsg::Shutdown,
-        correlation_id: None
-    };
-    service_tx.send(shutdown_envelope).unwrap();
-    node.shutdown();
-
-    for h in handles {
-        h.join().unwrap();
-    }
-
 }
 
+/// Verify that after all client operations have gotten replies that the history of operations in
+/// each replica is identical.
+fn verify_histories(pids: &Vec<Pid>) {
+    let pids = pids.clone();
+    let h = thread::spawn(move || {
+        let mut sock = TcpStream::connect(API_SERVER_IP).unwrap();
+        sock.set_nonblocking(true).unwrap();
+        let mut serializer = MsgpackSerializer::new();
+        let mut history = Vec::new();
+        for pid in pids {
+            assert_matches!(serializer.write_msgs(&mut sock,
+                                                  Some(&ClientMsg::GetHistory(pid))),
+                                                  Ok(true));
+            loop {
+                thread::sleep(time::Duration::from_millis(10));
+                match serializer.read_msg(&mut sock) {
+                    Ok(None) => (),
+                    Ok(Some(ClientMsg::History(h))) => {
+                        if history.len() == 0 {
+                            history = h;
+                        } else {
+                            assert_eq!(history, h);
+                            assert!(history.len() != 0);
+                        }
+                        break;
+                    },
+                    Ok(val) => {
+                        println!("{:?}", val);
+                        assert!(false)
+                    },
+                    Err(e) => {
+                        println!("{}", e);
+                        assert!(false)
+                    }
+                }
+            }
+        }
+    });
+    h.join().unwrap();
+}

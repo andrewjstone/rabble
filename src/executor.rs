@@ -80,7 +80,6 @@ impl<T: Encodable + Decodable + Send, U: Debug> Executor<T, U> {
     }
 
     fn start(&mut self, pid: Pid, process: Box<Process<Msg=T, SystemUserMsg=U>>) {
-        println!("Executor starting process {}", pid);
         self.processes.insert(pid, process);
     }
 
