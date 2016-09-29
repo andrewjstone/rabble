@@ -56,4 +56,26 @@ impl<T: Encodable + Decodable, U> Envelope<T, U> {
             Envelope::System(SystemEnvelope {ref to, ..}) => to
         }
     }
+
+    pub fn new_system(to: Pid,
+                      from: Pid,
+                      msg: SystemMsg<U>,
+                      c_id: Option<CorrelationId>) -> Envelope<T, U>
+    {
+        Envelope::System(SystemEnvelope {
+            to: to,
+            from: from,
+            msg: msg,
+            correlation_id: c_id
+        })
+    }
+
+    pub fn new_process(to: Pid, from: Pid, msg: T, c_id: Option<CorrelationId>) -> Envelope<T, U> {
+        Envelope::Process(ProcessEnvelope {
+            to: to,
+            from: from,
+            msg: msg,
+            correlation_id: c_id
+        })
+    }
 }
