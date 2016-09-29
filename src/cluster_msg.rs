@@ -10,6 +10,6 @@ pub enum ClusterMsg<T: Encodable + Decodable> {
     PollNotifications(Vec<Notification>),
     Join(NodeId),
     User(ProcessEnvelope<T>),
-    GetStatus(Pid, Option<CorrelationId>),
+    GetStatus(CorrelationId),
     Shutdown
 }

@@ -30,7 +30,7 @@ fn single_service_and_handler_get_executor_status() {
         assert_matches!(envelope.msg, SystemMsg::ExecutorStatus(_));
     });
     let mut service = Service::new(pid2.clone(), node.clone(), handler).unwrap();
-    node.executor_status(pid2, None).unwrap();
+    node.executor_status(CorrelationId::pid(pid2)).unwrap();
     thread::spawn(move || {
         service.wait();
     });

@@ -25,11 +25,12 @@ use rabble::{
     Node
 };
 
+const CLUSTER_SERVER_IP: &'static str = "127.0.0.1:11001";
 const API_SERVER_IP: &'static str  = "127.0.0.1:12001";
 
 #[test]
 fn chain_replication() {
-    let node_id = NodeId {name: "node1".to_string(), addr: "127.0.0.1:11001".to_string()};
+    let node_id = NodeId {name: "node1".to_string(), addr: CLUSTER_SERVER_IP.to_string()};
     let test_pid = Pid { name: "test-runner".to_string(), group: None, node: node_id.clone()};
     let (node, mut handles) = rabble::rouse::<ProcessMsg, SystemUserMsg>(node_id);
 

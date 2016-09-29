@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::net::{TcpListener, TcpStream};
 use std::io::{self, Error, ErrorKind};
 use std::fmt::Debug;
+use libc::EINPROGRESS;
 use net2::{TcpBuilder, TcpStreamExt};
 use rustc_serialize::{Encodable, Decodable};
 use msgpack::{Encoder, Decoder};
@@ -103,22 +104,22 @@ impl<T: Encodable + Decodable, U: Debug> ClusterServer<T, U> {
                     self.handle_poll_notifications(notifications),
                 ClusterMsg::Join(node) => self.join(node),
                 ClusterMsg::User(envelope) => self.send_remote(envelope),
-                ClusterMsg::GetStatus(pid, correlation_id) => self.get_status(pid, correlation_id),
+                ClusterMsg::GetStatus(correlation_id) => self.get_status(correlation_id),
                 ClusterMsg::Shutdown => return
             }
         }
     }
 
-    fn get_status(&self, pid: Pid, correlation_id: Option<CorrelationId>) {
+    fn get_status(&self, correlation_id: CorrelationId) {
         let status = ClusterStatus {
             members: self.members.clone(),
             connected: self.established.keys().cloned().collect()
         };
         let system_envelope = SystemEnvelope {
-            to: pid,
+            to: correlation_id.pid.clone(),
             from: self.pid.clone(),
             msg: SystemMsg::ClusterStatus(status),
-            correlation_id: correlation_id
+            correlation_id: Some(correlation_id)
         };
         // Route the response through the executor since it knows how to contact all Pids
         let envelope = Envelope::System(system_envelope);
@@ -264,19 +265,19 @@ impl<T: Encodable + Decodable, U: Debug> ClusterServer<T, U> {
         // TODO: Could this ever actually fail?
         let sock = TcpBuilder::new_v4().unwrap().to_tcp_stream().unwrap();
         sock.set_nonblocking(true).unwrap();
-        match sock.connect(&node.addr[..]) {
-            Err(ref e) if e.kind() != io::ErrorKind::WouldBlock => {
+        if let Err(e) = sock.connect(&node.addr[..]) {
+            if e.raw_os_error().is_some() && *e.raw_os_error().as_ref().unwrap() != EINPROGRESS {
+                println!("failed to connect: {}", e);
                 // TODO: Log error
-            },
-            _ => {
-                if let Ok(id) = self.registrar.register(&sock, Event::Read) {
-                    let mut conn = Conn::new(sock, Some(node), true);
-                    conn.timer_wheel_index = self.timer_wheel.insert(id);
-                    self.connections.insert(id, conn);
-                } else {
-                    // TODO: Log Error
-                }
+                return;
             }
+        }
+        if let Ok(id) = self.registrar.register(&sock, Event::Read) {
+            let mut conn = Conn::new(sock, Some(node), true);
+            conn.timer_wheel_index = self.timer_wheel.insert(id);
+            self.connections.insert(id, conn);
+        } else {
+            // TODO: Log Error
         }
     }
 

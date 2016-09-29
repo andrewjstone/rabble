@@ -56,25 +56,24 @@ impl<T: Encodable + Decodable + Send, U: Debug> Executor<T, U> {
                 ExecutorMsg::RegisterSystemThread(pid, tx) => {
                     self.system_senders.insert(pid, tx);
                 },
-                ExecutorMsg::GetStatus(pid, correlation_id) =>
-                    self.get_status(pid, correlation_id),
+                ExecutorMsg::GetStatus(correlation_id) => self.get_status(correlation_id),
 
-                // Just return so the thread exits. This will trigger the cluster server to shutdown
+                // Just return so the thread exits
                 Shutdown => return
             }
         }
     }
 
-    fn get_status(&self, pid: Pid, correlation_id: Option<CorrelationId>) {
+    fn get_status(&self, correlation_id: CorrelationId) {
         let status = ExecutorStatus {
             total_processes: self.processes.len(),
             system_threads: self.system_senders.keys().cloned().collect()
         };
         let envelope = SystemEnvelope {
-            to: pid,
+            to: correlation_id.pid.clone(),
             from: self.pid.clone(),
             msg: SystemMsg::ExecutorStatus(status),
-            correlation_id: correlation_id
+            correlation_id: Some(correlation_id)
         };
         self.route_to_thread(envelope);
     }

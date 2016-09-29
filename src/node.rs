@@ -82,16 +82,16 @@ impl<T: Encodable + Decodable, U: Debug + Clone> Node<T, U> {
     }
 
     /// Get the status of the executor
-    pub fn executor_status(&self, from: Pid, correlation_id: Option<CorrelationId>) -> Result<()> {
+    pub fn executor_status(&self, correlation_id: CorrelationId) -> Result<()> {
         send!(self.executor_tx,
-              ExecutorMsg::GetStatus(from, correlation_id),
+              ExecutorMsg::GetStatus(correlation_id),
               "ExecutorMsg::GetStatus".to_string())
     }
 
     /// Get the status of the cluster server
-    pub fn cluster_status(&self, from: Pid, correlation_id: Option<CorrelationId>) -> Result<()> {
+    pub fn cluster_status(&self, correlation_id: CorrelationId) -> Result<()> {
         send!(self.cluster_tx,
-              ClusterMsg::GetStatus(from, correlation_id),
+              ClusterMsg::GetStatus(correlation_id),
               "ClusterMsg::GetStatus".to_string())
     }
 

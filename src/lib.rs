@@ -9,6 +9,7 @@ extern crate rmp_serialize as msgpack;
 extern crate amy;
 extern crate time;
 extern crate net2;
+extern crate libc;
 
 mod errors;
 mod node_id;
@@ -46,6 +47,8 @@ pub use envelope::{
 };
 pub use service::Service;
 pub use correlation_id::CorrelationId;
+pub use cluster_status::ClusterStatus;
+pub use executor_status::ExecutorStatus;
 pub use system_msg::SystemMsg;
 pub use system_envelope_handler::SystemEnvelopeHandler;
 pub use connection_handler::{

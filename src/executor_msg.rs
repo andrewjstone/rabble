@@ -12,6 +12,6 @@ pub enum ExecutorMsg<T: Encodable + Decodable, U: Debug> {
     Stop(Pid),
     User(Envelope<T, U>),
     RegisterSystemThread(Pid, amy::Sender<SystemEnvelope<U>>),
-    GetStatus(Pid, Option<CorrelationId>),
+    GetStatus(CorrelationId),
     Shutdown
 }
