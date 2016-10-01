@@ -13,44 +13,44 @@ error_chain! {
 
     errors {
         EncodeError(id: Option<usize>, to: Option<NodeId>) {
-            description("failed to encode message")
-            display("failed to encode message to {:?}, id={:?}", to, id)
+            description("Failed to encode message")
+            display("Failed to encode message to {:?}, id={:?}", to, id)
         }
         DecodeError(id: usize, from: Option<NodeId>) {
-            description("failed to decode message")
-            display("failed to decode message from {:?}, id={}", from, id)
+            description("Failed to decode message")
+            display("Failed to decode message from {:?}, id={}", from, id)
         }
         RegistrarError(id: Option<usize>, node: Option<NodeId>) {
-            description("failed to register/deregister/reregister socket")
-            display("failed to register/deregister/reregister socket: id={:?}, peer={:?}", id, node)
+            description("Failed to register/deregister/reregister socket")
+            display("Failed to register/deregister/reregister socket: id={:?}, peer={:?}", id, node)
         }
         WriteError(id: usize, node: Option<NodeId>) {
-            description("failed to write to socket")
-            display("failed to write to socket: id={}, peer={:?}", id, node)
+            description("Failed to write to socket")
+            display("Failed to write to socket: id={}, peer={:?}", id, node)
         }
         ReadError(id: usize, node: Option<NodeId>) {
-            description("failed to read from socket")
-            display("failed to read from socket: id={}, peer={:?}", id, node)
+            description("Failed to read from socket")
+            display("Failed to read from socket: id={}, peer={:?}", id, node)
         }
         BroadcastError(errors: Vec<Error>) {
-            description("failed to broadcast")
-            display("failed to broadcast: errors = {:?}", errors)
+            description("Failed to broadcast")
+            display("Failed to broadcast: errors = {:?}", errors)
         }
         PollNotificationErrors(errors: Vec<Error>) {
-            description("failed to process poll notifications")
-            display("failed to process poll notifications: errors = {:?}", errors)
+            description("Failed to process poll notifications")
+            display("Failed to process poll notifications: errors = {:?}", errors)
         }
         ConnectError(node: NodeId) {
-            description("failed to connect")
-            display("failed to connect to {}", node)
+            description("Failed to connect")
+            display("Failed to connect to {}", node)
         }
         SendError(msg: String, pid: Option<Pid>) {
-            description("failed to send")
-            display("failed to send {} to {:?}", msg, pid)
+            description("Failed to send")
+            display("Failed to send {} to {:?}", msg, pid)
         }
         Shutdown(pid: Pid) {
-            description("shutting down")
-            display("shutting down {}", pid)
+            description("Shutting down")
+            display("Shutting down {}", pid)
         }
     }
 }

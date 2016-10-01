@@ -135,11 +135,8 @@ impl <C,S> TcpServerHandler<C, S>
                 },
                 Err(e) => {
                     if e.kind() == io::ErrorKind::WouldBlock {
-                        return registrar.reregister(self.listener_id, &self.listener, Event::Read)
-                            .chain_err(|| "Failed to reregister listen socket for read events");
+                        return Ok(())
                     }
-                    println!("Accept error {}", e);
-                    // TODO: Panic?
                     return Err(e.into())
                 }
             }
@@ -171,7 +168,7 @@ impl <C,S> TcpServerHandler<C, S>
             if notification.event.writable() {
                 // Notify the serializer that the socket is writable again
                 connection.serializer.set_writable();
-                writable = try!(connection.serializer.write_msgs(&mut connection.sock, None));
+                try!(connection.serializer.write_msgs(&mut connection.sock, None));
             }
 
             if notification.event.readable() {
@@ -181,8 +178,6 @@ impl <C,S> TcpServerHandler<C, S>
                                                 registrar));
                 update_connection_timeout(connection, &mut self.connection_timer_wheel);
             }
-
-            try!(reregister(notification.id, &connection.sock, registrar, writable));
         }
         Ok(())
     }
@@ -324,18 +319,6 @@ fn handle_readable<C, S>(connection: &mut Connection<C, S>,
     Ok(writable)
 }
 
-/// Reregister a socket for an existing connection
-fn reregister(id: usize, sock: &TcpStream, registrar: &Registrar, writable: bool) -> Result<()>
-{
-    if !writable {
-        return registrar.reregister(id, sock, Event::Both)
-            .chain_err(|| "Failed to reregister socket for read and write events");
-    } else {
-        return registrar.reregister(id, sock, Event::Read)
-            .chain_err(|| "Failed to reregister socket for read events");
-    }
-}
-
 /// A new message has been received on a connection. Reset the timer.
 fn update_connection_timeout<C, S>(connection: &mut Connection<C, S>,
                                 timer_wheel: &mut Option<TimerWheel<usize>>)
@@ -396,15 +379,9 @@ fn run_handle_system_envelope<C, S>(envelope: SystemEnvelope<C::SystemUserMsg>,
           S: Serialize
 {
     let responses = connection.handler.handle_system_envelope(envelope);
-    let writable = try!(handle_connection_msgs(request_timer_wheel,
-                                               responses,
-                                               &mut connection.serializer,
-                                               &mut connection.sock,
-                                               node));
-    if !writable {
-        try!(registrar.reregister(connection_id, &connection.sock, Event::Both)
-             .chain_err(|| "Failed to reregister socket for read and write events \
-                            during run_handle_system_envelope()"));
-    }
-    Ok(())
+    handle_connection_msgs(request_timer_wheel,
+                                responses,
+                                &mut connection.serializer,
+                                &mut connection.sock,
+                                node).map(|_| ())
 }

@@ -229,7 +229,7 @@ impl<T: Encodable + Decodable, U: Debug> ClusterServer<T, U> {
     fn handle_decoded_message(&mut self, id: usize, msg: ExternalMsg<T>) -> Result<()> {
         match msg {
             ExternalMsg::Members{from, orset} => {
-                info!(self.logger, "Got Members"; "from" => from.to_string());
+                info!(self.logger, "Got Members"; "id" => id, "from" => from.to_string());
                 self.establish_connection(id, from, orset);
                 self.check_connections();
             },
@@ -255,12 +255,12 @@ impl<T: Encodable + Decodable, U: Debug> ClusterServer<T, U> {
 
     fn write(&mut self, id: usize, msg: Option<Vec<u8>>) -> Result<()> {
         if let Some(conn) = self.connections.get_mut(&id) {
-            let writable = try!(conn.writer.write(&mut conn.sock, msg)
-                                .chain_err(|| ErrorKind::WriteError(id, conn.node.clone())));
-            if !writable {
-                try!(self.registrar.reregister(id, &conn.sock, Event::Both)
-                    .chain_err(|| ErrorKind::RegistrarError(Some(id), conn.node.clone())));
+            if msg.is_none() {
+                // We just got an Event::Write from the poller
+                conn.writer.writable();
             }
+            try!(conn.writer.write(&mut conn.sock, msg)
+                 .chain_err(|| ErrorKind::WriteError(id, conn.node.clone())));
         }
         Ok(())
     }
@@ -319,8 +319,6 @@ impl<T: Encodable + Decodable, U: Debug> ClusterServer<T, U> {
             let node = conn.node.clone();
             try!(conn.reader.read(&mut conn.sock)
                  .chain_err(|| ErrorKind::ReadError(id, node.clone())));
-            try!(self.registrar.reregister(id, &conn.sock, Event::Read)
-                 .chain_err(|| ErrorKind::RegistrarError(Some(id), node.clone())));
 
             for frame in conn.reader.iter_mut() {
                 let mut decoder = Decoder::new(&frame[..]);
@@ -360,7 +358,7 @@ impl<T: Encodable + Decodable, U: Debug> ClusterServer<T, U> {
     }
 
     fn init_connection(&mut self, sock: TcpStream) -> Result<usize> {
-        let id = try!(self.registrar.register(&sock, Event::Read)
+        let id = try!(self.registrar.register(&sock, Event::Both)
                       .chain_err(|| ErrorKind::RegistrarError(None, None)));
         let mut conn = Conn::new(sock, None, false);
         conn.timer_wheel_index = self.timer_wheel.insert(id);
@@ -371,12 +369,9 @@ impl<T: Encodable + Decodable, U: Debug> ClusterServer<T, U> {
     fn send_members(&mut self, id: usize) -> Result<()> {
         let encoded = try!(self.encode_members(id));
         if let Some(conn) = self.connections.get_mut(&id) {
-            let writable = try!(conn.writer.write(&mut conn.sock, Some(encoded))
-                                .chain_err(|| ErrorKind::WriteError(id, None)));
-            if !writable {
-                try!(self.registrar.reregister(id, &conn.sock, Event::Both)
-                     .chain_err(|| ErrorKind::RegistrarError(Some(id), None)));
-            }
+            info!(self.logger, "Send members"; "id" => id);
+            try!(conn.writer.write(&mut conn.sock, Some(encoded))
+                 .chain_err(|| ErrorKind::WriteError(id, None)));
             conn.members_sent = true;
         }
         Ok(())
@@ -412,10 +407,11 @@ impl<T: Encodable + Decodable, U: Debug> ClusterServer<T, U> {
             let _ = self.registrar.deregister(conn.sock);
             self.timer_wheel.remove(&id, conn.timer_wheel_index);
             if let Some(node) = conn.node {
-                info!(self.logger, "Closing established connection"; "peer" => node.to_string());
+                info!(self.logger, "Closing established connection";
+                      "id" => id,"peer" => node.to_string());
                 self.established.remove(&node);
             } else {
-                info!(self.logger, "Closing unestablished connection");
+                info!(self.logger, "Closing unestablished connection"; "id" => id);
             }
         }
     }
@@ -436,14 +432,8 @@ impl<T: Encodable + Decodable, U: Debug> ClusterServer<T, U> {
                 // This connection isn't connected yet
                 continue;
             }
-            match conn.writer.write(&mut conn.sock, Some(encoded.clone())) {
-                Ok(false) => {
-                    if let Err(e) = self.registrar.reregister(*id, &conn.sock, Event::Both) {
-                        errors.push(registrar_error(e, *id, &conn.node));
-                    }
-                },
-                Ok(true) => (),
-                Err(e) => errors.push(write_error(e, *id, &conn.node))
+            if let Err(e) = conn.writer.write(&mut conn.sock, Some(encoded.clone())) {
+                errors.push(write_error(e, *id, &conn.node))
             }
         }
         if errors.len() != 0 {

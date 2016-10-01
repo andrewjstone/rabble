@@ -1,6 +1,7 @@
 use std::sync::mpsc::{channel, Sender, Receiver};
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std; // needed for slog
 use amy::{self, Poller, Registrar, Notification};
 use pid::Pid;
 use rustc_serialize::{Encodable, Decodable};
@@ -9,6 +10,7 @@ use service_handler::ServiceHandler;
 use envelope::{Envelope, SystemEnvelope};
 use node::Node;
 use errors::*;
+use slog;
 
 /// A system service that operates on a single thread. A service is registered via its pid
 /// with the executor and can send and receive messages to processes as well as other services.
@@ -24,7 +26,8 @@ pub struct Service<T, U, H>
     node: Node<T, U>,
     poller: Poller,
     registrar: Registrar,
-    handler: H
+    handler: H,
+    logger: slog::Logger
 }
 
 impl<T, U, H> Service<T, U, H>
@@ -38,6 +41,7 @@ impl<T, U, H> Service<T, U, H>
         let (tx, rx) = registrar.channel().unwrap();
         try!(node.register_system_thread(&pid, &tx));
         try!(handler.init(&registrar, &node));
+        let logger = node.logger.new(o!("component" => "service"));
         Ok(Service {
             pid: pid,
             request_count: 0,
@@ -46,7 +50,8 @@ impl<T, U, H> Service<T, U, H>
             node: node,
             poller: poller,
             registrar: registrar,
-            handler: handler
+            handler: handler,
+            logger: logger
         })
     }
 
@@ -57,18 +62,21 @@ impl<T, U, H> Service<T, U, H>
                 if notification.id == self.rx.get_id() {
                     if let Err(e) = self.handle_system_envelopes() {
                         if let ErrorKind::Shutdown(_) = *e.kind() {
-                            // TODO: Log shutdown
-                            println!("Service {}", e);
+                            info!(self.logger, "Service shutting down";
+                                  "pid" => self.pid.to_string());
                             return;
                         }
-                        println!("ERROR HANDLING SSYSTEM ENVELOPE {:?}", e);
-                        // TODO: Log error
+                        error!(self.logger,
+                               "Failed to handle system envelope";
+                               "error" => e.to_string())
                     }
                 } else {
                     if let Err(e) = self.handler.handle_notification(&self.node,
                                                                      notification,
                                                                      &self.registrar) {
-                        //TODO: Log error
+                        error!(self.logger,
+                               "Failed to handle poll notification";
+                               "error" => e.to_string())
                     }
                 }
             }
