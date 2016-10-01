@@ -5,6 +5,13 @@ extern crate rabble;
 extern crate assert_matches;
 extern crate rustc_serialize;
 
+#[macro_use]
+extern crate slog;
+extern crate slog_stdlog;
+extern crate slog_envlogger;
+extern crate slog_term;
+extern crate log;
+
 mod utils;
 
 use std::{thread, time};
@@ -12,6 +19,7 @@ use std::thread::JoinHandle;
 use std::net::TcpStream;
 use std::str;
 use amy::{Poller, Receiver};
+use slog::DrainExt;
 
 use utils::messages::*;
 use utils::replica::Replica;
@@ -68,9 +76,14 @@ fn chain_replication() {
 }
 
 fn start_nodes() -> (Vec<CrNode>, Vec<JoinHandle<()>>) {
+    let term = slog_term::streamer().build();
+    let drain = slog_envlogger::LogBuilder::new(term)
+        .filter(None, slog::FilterLevel::Trace).build();
+    let root_logger = slog::Logger::root(drain.fuse(), o!());
+    slog_stdlog::set_logger(root_logger.clone()).unwrap();
     create_node_ids().into_iter().fold((Vec::new(), Vec::new()),
                                   |(mut nodes, mut handles), node_id| {
-        let (node, handle_list) = rabble::rouse(node_id);
+        let (node, handle_list) = rabble::rouse(node_id, Some(root_logger.clone()));
         nodes.push(node);
         handles.extend(handle_list);
         (nodes, handles)

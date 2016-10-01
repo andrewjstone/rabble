@@ -2,6 +2,9 @@ use rustc_serialize::{Encodable, Decodable};
 use std::fmt::Debug;
 use std::sync::mpsc::{Sender, Receiver};
 use std::collections::HashMap;
+use std;
+use amy;
+use slog;
 use envelope::{Envelope, SystemEnvelope, ProcessEnvelope};
 use pid::Pid;
 use process::Process;
@@ -11,7 +14,6 @@ use cluster_msg::ClusterMsg;
 use executor_status::ExecutorStatus;
 use system_msg::SystemMsg;
 use correlation_id::CorrelationId;
-use amy;
 
 pub struct Executor<T: Encodable + Decodable + Send, U: Debug> {
     pid: Pid,
@@ -20,14 +22,16 @@ pub struct Executor<T: Encodable + Decodable + Send, U: Debug> {
     system_senders: HashMap<Pid, amy::Sender<SystemEnvelope<U>>>,
     tx: Sender<ExecutorMsg<T, U>>,
     rx: Receiver<ExecutorMsg<T, U>>,
-    cluster_tx: Sender<ClusterMsg<T>>
+    cluster_tx: Sender<ClusterMsg<T>>,
+    logger: slog::Logger,
 }
 
 impl<T: Encodable + Decodable + Send, U: Debug> Executor<T, U> {
     pub fn new(node: NodeId,
                tx: Sender<ExecutorMsg<T, U>>,
                rx: Receiver<ExecutorMsg<T, U>>,
-               cluster_tx: Sender<ClusterMsg<T>>) -> Executor<T, U> {
+               cluster_tx: Sender<ClusterMsg<T>>,
+               logger: slog::Logger) -> Executor<T, U> {
         let pid = Pid {
             group: Some("rabble".to_string()),
             name: "Executor".to_string(),
@@ -40,7 +44,8 @@ impl<T: Encodable + Decodable + Send, U: Debug> Executor<T, U> {
             system_senders: HashMap::new(),
             tx: tx,
             rx: rx,
-            cluster_tx: cluster_tx
+            cluster_tx: cluster_tx,
+            logger: logger.new(o!("component" => "executor"))
         }
     }
 
@@ -59,7 +64,7 @@ impl<T: Encodable + Decodable + Send, U: Debug> Executor<T, U> {
                 ExecutorMsg::GetStatus(correlation_id) => self.get_status(correlation_id),
 
                 // Just return so the thread exits
-                Shutdown => return
+                ExecutorMsg::Shutdown => return
             }
         }
     }
