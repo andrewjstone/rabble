@@ -1,17 +1,13 @@
 use rabble::Pid;
 
-// Messages sent to processes
+// Messages sent to processes and system threads
 #[derive(Debug, Clone, Eq, PartialEq, RustcEncodable, RustcDecodable)]
-pub enum ProcessMsg {
-    Op(usize),
-    GetHistory
-}
+pub enum RabbleUserMsg {
+    Op(usize), // Request
+    OpComplete, // Reply
 
-// Messages sent to system threads
-#[derive(Debug, Clone)]
-pub enum SystemUserMsg {
-    History(Vec<usize>),
-    OpComplete
+    GetHistory, // Request
+    History(Vec<usize>) // Reply
 }
 
 // Messages sent over the API server TCP connections

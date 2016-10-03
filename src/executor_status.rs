@@ -1,6 +1,6 @@
 use pid::Pid;
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, Eq, PartialEq, RustcEncodable, RustcDecodable)]
 pub struct ExecutorStatus {
     pub total_processes: usize,
     pub system_threads: Vec<Pid>,

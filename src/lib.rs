@@ -23,6 +23,7 @@ mod pid;
 mod process;
 mod envelope;
 mod executor;
+mod msg;
 mod executor_msg;
 mod cluster_msg;
 mod external_msg;
@@ -30,11 +31,10 @@ mod cluster_server;
 mod timer_wheel;
 mod executor_status;
 mod cluster_status;
-mod system_msg;
 mod service;
 mod service_handler;
 mod correlation_id;
-mod system_envelope_handler;
+mod thread_handler;
 mod tcp_server_handler;
 mod connection_handler;
 mod serialize;
@@ -44,17 +44,14 @@ pub use node_id::NodeId;
 pub use node::Node;
 pub use pid::Pid;
 pub use process::Process;
-pub use envelope::{
-    Envelope,
-    SystemEnvelope,
-    ProcessEnvelope
-};
+pub use envelope::Envelope;
 pub use service::Service;
 pub use correlation_id::CorrelationId;
+pub use msg::Msg;
 pub use cluster_status::ClusterStatus;
 pub use executor_status::ExecutorStatus;
-pub use system_msg::SystemMsg;
-pub use system_envelope_handler::SystemEnvelopeHandler;
+
+pub use thread_handler::ThreadHandler;
 pub use connection_handler::{
     ConnectionHandler,
     ConnectionMsg
@@ -80,9 +77,8 @@ const TIMEOUT: usize = 5000; // ms
 /// by rabble.
 ///
 /// All nodes in a cluster must be parameterized by the same type.
-pub fn rouse<T, U>(node_id: NodeId, logger: Option<slog::Logger>) -> (Node<T, U>, Vec<JoinHandle<()>>)
-  where T: Encodable + Decodable + Send + 'static,
-        U: Debug + Clone + Send + 'static
+pub fn rouse<T>(node_id: NodeId, logger: Option<slog::Logger>) -> (Node<T>, Vec<JoinHandle<()>>)
+  where T: Encodable + Decodable + Send + 'static + Clone + Debug,
 {
     let logger = match logger {
         Some(logger) => logger.new(o!("node_id" => node_id.to_string())),

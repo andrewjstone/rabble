@@ -9,13 +9,13 @@ use serialize::Serialize;
 
 const MAX_FRAME_SIZE: u32 = 64*1024*1024; // 64 MB
 
-pub struct MsgpackSerializer<T: Encodable + Decodable + Debug> {
+pub struct MsgpackSerializer<T: Encodable + Decodable + Debug + Clone> {
     frame_reader: FrameReader,
     frame_writer: FrameWriter,
     phantom: PhantomData<T>
 }
 
-impl<T: Encodable + Decodable + Debug> Serialize for MsgpackSerializer<T> {
+impl<T: Encodable + Decodable + Debug + Clone> Serialize for MsgpackSerializer<T> {
     type Msg = T;
 
     fn new() -> MsgpackSerializer<T> {

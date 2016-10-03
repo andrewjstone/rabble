@@ -7,16 +7,14 @@ use rustc_serialize::{Encodable, Decodable};
 use amy::{Registrar, Notification, Event, Timer};
 use errors::*;
 use service_handler::ServiceHandler;
-use envelope::{SystemEnvelope, Envelope};
-use node;
+use msg::Msg;
+use envelope::Envelope;
+use node::Node;
 use connection_handler::{ConnectionHandler, ConnectionMsg};
 use timer_wheel::TimerWheel;
 use pid::Pid;
 use correlation_id::CorrelationId;
-use system_msg::SystemMsg;
 use serialize::Serialize;
-
-type Node<C: ConnectionHandler> = node::Node<C::ProcessMsg, C::SystemUserMsg>;
 
 // The timer wheel expirations are accurate to within 1/TIMER_WHEEL_SLOTS of the timeout
 const TIMER_WHEEL_SLOTS: usize = 10;
@@ -159,12 +157,10 @@ impl <C,S> TcpServerHandler<C, S>
 
     fn handle_connection_notification(&mut self,
                                       notification: &Notification,
-                                      node: &Node<C>,
+                                      node: &Node<C::Msg>,
                                       registrar: &Registrar) -> Result<()>
     {
         if let Some(connection) = self.connections.get_mut(&notification.id) {
-            let mut writable = true;
-
             if notification.event.writable() {
                 // Notify the serializer that the socket is writable again
                 connection.serializer.set_writable();
@@ -172,10 +168,7 @@ impl <C,S> TcpServerHandler<C, S>
             }
 
             if notification.event.readable() {
-                writable = try!(handle_readable(connection,
-                                                &mut self.request_timer_wheel,
-                                                node,
-                                                registrar));
+                try!(handle_readable(connection, &mut self.request_timer_wheel, node, registrar));
                 update_connection_timeout(connection, &mut self.connection_timer_wheel);
             }
         }
@@ -193,24 +186,24 @@ impl <C,S> TcpServerHandler<C, S>
 
     /// Handle request timer events and see if any requests have timed out.
     fn request_tick(&mut self,
-                    node: &Node<C>,
+                    node: &Node<C::Msg>,
                     registrar: &Registrar) -> Result<()>
     {
         for correlation_id in self.request_timer_wheel.expire() {
             let conn_id = correlation_id.connection.as_ref().unwrap();
             if let Some(mut connection) = self.connections.get_mut(&conn_id) {
-                let envelope = SystemEnvelope {
+                let envelope = Envelope {
                     from: self.pid.clone(),
                     to: self.pid.clone(),
-                    msg: SystemMsg::Timeout,
+                    msg: Msg::Timeout,
                     correlation_id: Some(correlation_id.clone())
                 };
-                try!(run_handle_system_envelope(envelope,
-                                                *conn_id,
-                                                &mut connection,
-                                                node,
-                                                &mut self.request_timer_wheel,
-                                                registrar));
+                let responses = connection.handler.handle_envelope(envelope);
+                try!(handle_connection_msgs(&mut self.request_timer_wheel,
+                                            responses,
+                                            &mut connection.serializer,
+                                            &mut connection.sock,
+                                            node));
             }
         }
         Ok(())
@@ -218,14 +211,14 @@ impl <C,S> TcpServerHandler<C, S>
 }
 
 
-impl<C, S> ServiceHandler<C::ProcessMsg, C::SystemUserMsg> for TcpServerHandler<C, S>
+impl<C, S> ServiceHandler<C::Msg> for TcpServerHandler<C, S>
     where C: ConnectionHandler<ClientMsg=S::Msg>,
           S: Serialize
 {
     /// Initialize the state of the handler: Register timers and tcp listen socket
     fn init(&mut self,
             registrar: &Registrar,
-            node: &Node<C>) -> Result<()>
+            node: &Node<C::Msg>) -> Result<()>
     {
         self.listener_id = try!(registrar.register(&self.listener, Event::Read)
                                 .chain_err(|| "Failed to register listener"));
@@ -244,7 +237,7 @@ impl<C, S> ServiceHandler<C::ProcessMsg, C::SystemUserMsg> for TcpServerHandler<
 
     /// Handle any poll notifications
     fn handle_notification(&mut self,
-                           node: &Node<C>,
+                           node: &Node<C::Msg>,
                            notification: Notification,
                            registrar: &Registrar) -> Result<()>
     {
@@ -275,10 +268,10 @@ impl<C, S> ServiceHandler<C::ProcessMsg, C::SystemUserMsg> for TcpServerHandler<
     }
 
     /// Handle a system envelope from a process or system thread
-    fn handle_system_envelope(&mut self,
-                              node: &Node<C>,
-                              envelope: SystemEnvelope<C::SystemUserMsg>,
-                              registrar: &Registrar) -> Result<()>
+    fn handle_envelope(&mut self,
+                       node: &Node<C::Msg>,
+                       envelope: Envelope<C::Msg>,
+                       registrar: &Registrar) -> Result<()>
     {
         if envelope.correlation_id.is_none() {
             return Err(format!("No correlation id for envelope {:?}", envelope).into());
@@ -288,35 +281,35 @@ impl<C, S> ServiceHandler<C::ProcessMsg, C::SystemUserMsg> for TcpServerHandler<
         let conn_id = envelope.correlation_id.as_ref().unwrap().connection.as_ref().cloned().unwrap();
         if let Some(mut connection) = self.connections.get_mut(&conn_id) {
             let correlation_id = envelope.correlation_id.as_ref().unwrap().clone();
-            try!(run_handle_system_envelope(envelope,
-                                            conn_id,
-                                            &mut connection,
-                                            node,
-                                            &mut self.request_timer_wheel,
-                                            registrar));
+            let responses = connection.handler.handle_envelope(envelope);
+            try!(handle_connection_msgs(&mut self.request_timer_wheel,
+                                        responses,
+                                        &mut connection.serializer,
+                                        &mut connection.sock,
+                                        node));
+
         }
         Ok(())
     }
 }
 
-/// Handle any readable notifications. Returns whether the socket is still writable.
+/// Handle any readable notifications.
 fn handle_readable<C, S>(connection: &mut Connection<C, S>,
                       request_timer_wheel: &mut TimerWheel<CorrelationId>,
-                      node: &Node<C>,
-                      registrar: &Registrar) -> Result<bool>
+                      node: &Node<C::Msg>,
+                      registrar: &Registrar) -> Result<()>
     where C: ConnectionHandler<ClientMsg=S::Msg>,
           S: Serialize
 {
-    let mut writable = true;
     while let Some(msg) = try!(connection.serializer.read_msg(&mut connection.sock)) {
         let responses = connection.handler.handle_network_msg(msg);
-        let writable = try!(handle_connection_msgs(request_timer_wheel,
-                                                   responses,
-                                                   &mut connection.serializer,
-                                                   &mut connection.sock,
-                                                   node));
+        try!(handle_connection_msgs(request_timer_wheel,
+                                    responses,
+                                    &mut connection.serializer,
+                                    &mut connection.sock,
+                                    node));
     }
-    Ok(writable)
+    Ok(())
 }
 
 /// A new message has been received on a connection. Reset the timer.
@@ -334,54 +327,29 @@ fn update_connection_timeout<C, S>(connection: &mut Connection<C, S>,
 /// Send client replies and route envelopes
 ///
 /// For any envelopes with correlation ids, record them in the request timer wheel.
-/// Return whether the connection is writable or not
 fn handle_connection_msgs<C, S>(request_timer_wheel: &mut TimerWheel<CorrelationId>,
                              msgs: &mut Vec<ConnectionMsg<C>>,
                              serializer: &mut S,
                              sock: &mut TcpStream,
-                             node: &Node<C>) -> Result<(bool)>
+                             node: &Node<C::Msg>) -> Result<()>
     where C: ConnectionHandler<ClientMsg=S::Msg>,
           S: Serialize
 {
-    let mut writable = true;
     for m in msgs.drain(..) {
         match m {
-            ConnectionMsg::Envelope(Envelope::Process(pe)) => {
-                if pe.correlation_id.is_some() {
-                    request_timer_wheel.insert(pe.correlation_id.as_ref().unwrap().clone());
+            ConnectionMsg::Envelope(envelope) => {
+                if envelope.correlation_id.is_some() {
+                    request_timer_wheel.insert(envelope.correlation_id.as_ref().unwrap().clone());
                 }
-                node.send(Envelope::Process(pe));
-            },
-            ConnectionMsg::Envelope(Envelope::System(se))  => {
-                if se.correlation_id.is_some() {
-                    request_timer_wheel.insert(se.correlation_id.as_ref().unwrap().clone());
-                }
-                node.send(Envelope::System(se));
+                node.send(envelope);
             },
             ConnectionMsg::Client(client_msg, correlation_id) => {
                 // Respond to the client
-                writable = try!(serializer.write_msgs(sock, Some(&client_msg))
-                                .chain_err(|| format!("Failed to write client msg: {:?}",
-                                                      client_msg)));
+                try!(serializer.write_msgs(sock, Some(&client_msg))
+                     .chain_err(|| format!("Failed to write client msg: {:?}",
+                                           client_msg)));
             }
         }
     }
-    Ok(writable)
-}
-
-fn run_handle_system_envelope<C, S>(envelope: SystemEnvelope<C::SystemUserMsg>,
-                                   connection_id: usize,
-                                   connection: &mut Connection<C, S>,
-                                   node: &Node<C>,
-                                   request_timer_wheel: &mut TimerWheel<CorrelationId>,
-                                   registrar: &Registrar) -> Result<()>
-    where C: ConnectionHandler<ClientMsg=S::Msg>,
-          S: Serialize
-{
-    let responses = connection.handler.handle_system_envelope(envelope);
-    handle_connection_msgs(request_timer_wheel,
-                                responses,
-                                &mut connection.serializer,
-                                &mut connection.sock,
-                                node).map(|_| ())
+    Ok(())
 }

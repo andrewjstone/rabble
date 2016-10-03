@@ -7,7 +7,7 @@ use cluster_msg::ClusterMsg;
 use pid::Pid;
 use correlation_id::CorrelationId;
 use process::Process;
-use envelope::{Envelope, SystemEnvelope};
+use envelope::Envelope;
 use amy;
 use errors::*;
 use slog;
@@ -27,20 +27,20 @@ macro_rules! send {
 /// The Node api is used by services and their handlers to send messages, get status, join
 /// nodes into a cluster, etc...
 #[derive(Clone)]
-pub struct Node<T: Encodable + Decodable, U: Debug + Clone> {
+pub struct Node<T: Encodable + Decodable + Debug + Clone> {
     pub id: NodeId,
     pub logger: slog::Logger,
-    executor_tx: Sender<ExecutorMsg<T, U>>,
+    executor_tx: Sender<ExecutorMsg<T>>,
     cluster_tx: Sender<ClusterMsg<T>>
 }
 
-impl<T: Encodable + Decodable, U: Debug + Clone> Node<T, U> {
+impl<T: Encodable + Decodable + Debug + Clone> Node<T> {
     /// Create a new node. This function should not be called by the user directly. It is called by
     /// by the user call to `rabble::rouse(..)` that initializes a rabble system for a single node.
     pub fn new(id: NodeId,
-               executor_tx: Sender<ExecutorMsg<T, U>>,
+               executor_tx: Sender<ExecutorMsg<T>>,
                cluster_tx: Sender<ClusterMsg<T>>,
-               logger: slog::Logger) -> Node<T, U> {
+               logger: slog::Logger) -> Node<T> {
         Node {
             id: id,
             executor_tx: executor_tx,
@@ -64,8 +64,8 @@ impl<T: Encodable + Decodable, U: Debug + Clone> Node<T, U> {
               format!("ClusterMsg::Join({:?})", *node_id))
     }
 
-    /// Add a process to the executor that an be sent ProcessEnvelopes addressed to its pid
-    pub fn spawn(&self, pid: &Pid, process: Box<Process<Msg=T, SystemUserMsg=U>>) -> Result<()> {
+    /// Add a process to the executor that can be sent Envelopes addressed to its pid
+    pub fn spawn(&self, pid: &Pid, process: Box<Process<Msg=T>>) -> Result<()> {
         send!(self.executor_tx,
               ExecutorMsg::Start(pid.clone(), process),
               Some(pid),
@@ -74,7 +74,7 @@ impl<T: Encodable + Decodable, U: Debug + Clone> Node<T, U> {
 
     /// Register a Service's sender with the executor so that it can be sent messages addressed to
     /// its pid
-    pub fn register_system_thread(&self, pid: &Pid, tx: &amy::Sender<SystemEnvelope<U>>) -> Result<()>
+    pub fn register_system_thread(&self, pid: &Pid, tx: &amy::Sender<Envelope<T>>) -> Result<()>
     {
         send!(self.executor_tx,
               ExecutorMsg::RegisterSystemThread(pid.clone(), tx.clone()),
@@ -84,12 +84,12 @@ impl<T: Encodable + Decodable, U: Debug + Clone> Node<T, U> {
 
     /// Send an envelope to the executor so it gets routed to the appropriate process or system
     /// thread
-    pub fn send(&self, envelope: Envelope<T, U>) -> Result<()> {
-        let to = envelope.to().clone();
+    pub fn send(&self, envelope: Envelope<T>) -> Result<()> {
+        let to = envelope.to.clone();
         send!(self.executor_tx,
-              ExecutorMsg::User(envelope),
+              ExecutorMsg::Envelope(envelope),
               Some(&to),
-              "ExecutorMsg::User(envelope)".to_string())
+              "ExecutorMsg::Envelope(envelope)".to_string())
     }
 
     /// Get the status of the executor

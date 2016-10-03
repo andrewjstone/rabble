@@ -16,7 +16,7 @@ use errors::*;
 /// to minimize memory consumption we just write as much as possible and worry about starvation
 /// management on the reader side.
 pub trait Serialize {
-    type Msg: Encodable + Decodable + Debug;
+    type Msg: Encodable + Decodable + Clone + Debug;
 
     fn new() -> Self;
 

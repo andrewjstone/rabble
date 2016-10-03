@@ -18,8 +18,8 @@ use utils::api_server;
 use rabble::{
     Pid,
     NodeId,
-    SystemEnvelope,
-    SystemMsg,
+    Envelope,
+    Msg,
     MsgpackSerializer,
     Serialize,
     Node
@@ -32,7 +32,7 @@ const API_SERVER_IP: &'static str  = "127.0.0.1:12001";
 fn chain_replication() {
     let node_id = NodeId {name: "node1".to_string(), addr: CLUSTER_SERVER_IP.to_string()};
     let test_pid = Pid { name: "test-runner".to_string(), group: None, node: node_id.clone()};
-    let (node, mut handles) = rabble::rouse::<ProcessMsg, SystemUserMsg>(node_id, None);
+    let (node, mut handles) = rabble::rouse::<RabbleUserMsg>(node_id, None);
 
     let pids = create_replica_pids(&node.id);
 
@@ -53,15 +53,15 @@ fn chain_replication() {
 
 }
 
-fn shutdown(node: Node<ProcessMsg, SystemUserMsg>,
+fn shutdown(node: Node<RabbleUserMsg>,
             test_pid: Pid,
             service_pid: Pid,
-            service_tx: Sender<SystemEnvelope<SystemUserMsg>>)
+            service_tx: Sender<Envelope<RabbleUserMsg>>)
 {
-    let shutdown_envelope = SystemEnvelope {
+    let shutdown_envelope = Envelope {
         to: service_pid,
         from: test_pid,
-        msg: SystemMsg::Shutdown,
+        msg: Msg::Shutdown,
         correlation_id: None
     };
     service_tx.send(shutdown_envelope).unwrap();
@@ -79,7 +79,7 @@ fn create_replica_pids(node_id: &NodeId) -> Vec<Pid> {
     }).collect()
 }
 
-fn spawn_replicas(node: &Node<ProcessMsg, SystemUserMsg>, pids: &Vec<Pid>) {
+fn spawn_replicas(node: &Node<RabbleUserMsg>, pids: &Vec<Pid>) {
     // Launch the three replicas participating in chain replication
     for i in 0..pids.len() {
         let next = if i == pids.len() - 1 {

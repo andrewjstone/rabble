@@ -11,14 +11,14 @@ use slog;
 use amy::{Registrar, Notification, Event, Timer, FrameReader, FrameWriter};
 use members::Members;
 use node_id::NodeId;
+use msg::Msg;
 use cluster_msg::ClusterMsg;
 use executor_msg::ExecutorMsg;
 use external_msg::ExternalMsg;
 use timer_wheel::TimerWheel;
-use envelope::{Envelope, ProcessEnvelope, SystemEnvelope};
+use envelope::Envelope;
 use orset::ORSet;
 use pid::Pid;
-use system_msg::SystemMsg;
 use cluster_status::ClusterStatus;
 use correlation_id::CorrelationId;
 use errors::*;
@@ -54,11 +54,11 @@ impl Conn {
 
 /// A struct that handles cluster membership connection and routing of messages to processes on
 /// other nodes.
-pub struct ClusterServer<T: Encodable + Decodable, U: Debug> {
+pub struct ClusterServer<T: Encodable + Decodable + Debug + Clone> {
     pid: Pid,
     node: NodeId,
     rx: Receiver<ClusterMsg<T>>,
-    executor_tx: Sender<ExecutorMsg<T, U>>,
+    executor_tx: Sender<ExecutorMsg<T>>,
     timer: Timer,
     timer_wheel: TimerWheel<usize>,
     listener: TcpListener,
@@ -70,12 +70,12 @@ pub struct ClusterServer<T: Encodable + Decodable, U: Debug> {
     logger: slog::Logger
 }
 
-impl<T: Encodable + Decodable, U: Debug> ClusterServer<T, U> {
+impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
     pub fn new(node: NodeId,
                rx: Receiver<ClusterMsg<T>>,
-               executor_tx: Sender<ExecutorMsg<T, U>>,
+               executor_tx: Sender<ExecutorMsg<T>>,
                registrar: Registrar,
-               logger: slog::Logger) -> ClusterServer<T, U> {
+               logger: slog::Logger) -> ClusterServer<T> {
         let pid = Pid {
             group: Some("rabble".to_string()),
             name: "ClusterServer".to_string(),
@@ -132,7 +132,7 @@ impl<T: Encodable + Decodable, U: Debug> ClusterServer<T, U> {
             ClusterMsg::PollNotifications(notifications) =>
                 self.handle_poll_notifications(notifications),
             ClusterMsg::Join(node) => self.join(node),
-            ClusterMsg::User(envelope) => self.send_remote(envelope),
+            ClusterMsg::Envelope(envelope) => self.send_remote(envelope),
             ClusterMsg::GetStatus(correlation_id) => self.get_status(correlation_id),
             ClusterMsg::Shutdown => Err(ErrorKind::Shutdown(self.pid.clone()).into())
         }
@@ -143,28 +143,28 @@ impl<T: Encodable + Decodable, U: Debug> ClusterServer<T, U> {
             members: self.members.clone(),
             connected: self.established.keys().cloned().collect()
         };
-        let system_envelope = SystemEnvelope {
+        let envelope = Envelope {
             to: correlation_id.pid.clone(),
             from: self.pid.clone(),
-            msg: SystemMsg::ClusterStatus(status),
+            msg: Msg::ClusterStatus(status),
             correlation_id: Some(correlation_id)
         };
         // Route the response through the executor since it knows how to contact all Pids
-        let envelope = Envelope::System(system_envelope);
-        if let Err(mpsc::SendError(ExecutorMsg::User(Envelope::System(se)))) =
-            self.executor_tx.send(ExecutorMsg::User(envelope))
+        if let Err(mpsc::SendError(ExecutorMsg::Envelope(envelope))) =
+            self.executor_tx.send(ExecutorMsg::Envelope(envelope))
         {
-            return Err(ErrorKind::SendError("ExecutorMsg::User".to_string(), Some(se.to)).into());
+            return Err(ErrorKind::SendError("ExecutorMsg::User".to_string(),
+                                            Some(envelope.to)).into());
         }
         Ok(())
     }
 
-    fn send_remote(&mut self, envelope: ProcessEnvelope<T>) -> Result<()> {
+    fn send_remote(&mut self, envelope: Envelope<T>) -> Result<()> {
         if let Some(id) = self.established.get(&envelope.to.node).cloned() {
             trace!(self.logger, "send remote"; "to" => envelope.to.to_string());
             let mut encoded = Vec::new();
             let node = envelope.to.node.clone();
-            try!(ExternalMsg::User(envelope).encode(&mut Encoder::new(&mut encoded))
+            try!(ExternalMsg::Envelope(envelope).encode(&mut Encoder::new(&mut encoded))
                 .chain_err(|| ErrorKind::EncodeError(Some(id), Some(node))));
             try!(self.write(id, Some(encoded)));
         }
@@ -237,16 +237,15 @@ impl<T: Encodable + Decodable, U: Debug> ClusterServer<T, U> {
                 trace!(self.logger, "Got Ping"; "id" => id);
                 self.reset_timer(id);
             }
-            ExternalMsg::User(process_envelope) => {
+            ExternalMsg::Envelope(envelope) => {
                 debug!(self.logger, "Got User Message";
-                       "from" => process_envelope.from.to_string(),
-                       "to" => process_envelope.to.to_string());
-                let envelope = Envelope::Process(process_envelope);
-                if let Err(mpsc::SendError(ExecutorMsg::User(Envelope::Process(pe))))
-                    = self.executor_tx.send(ExecutorMsg::User(envelope))
+                       "from" => envelope.from.to_string(),
+                       "to" => envelope.to.to_string());
+                if let Err(mpsc::SendError(ExecutorMsg::Envelope(envelope)))
+                    = self.executor_tx.send(ExecutorMsg::Envelope(envelope))
                 {
-                    return Err(ErrorKind::SendError("ExecutorMsg::User".to_string(),
-                                                    Some(pe.to)).into());
+                    return Err(ErrorKind::SendError("ExecutorMsg::Enelope".to_string(),
+                                                    Some(envelope.to)).into());
                 }
             }
         }

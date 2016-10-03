@@ -5,33 +5,33 @@ use std::collections::HashMap;
 use std;
 use amy;
 use slog;
-use envelope::{Envelope, SystemEnvelope, ProcessEnvelope};
+use envelope::Envelope;
 use pid::Pid;
 use process::Process;
 use node_id::NodeId;
+use msg::Msg;
 use executor_msg::ExecutorMsg;
 use cluster_msg::ClusterMsg;
 use executor_status::ExecutorStatus;
-use system_msg::SystemMsg;
 use correlation_id::CorrelationId;
 
-pub struct Executor<T: Encodable + Decodable + Send, U: Debug> {
+pub struct Executor<T: Encodable + Decodable + Send + Debug + Clone> {
     pid: Pid,
     node: NodeId,
-    processes: HashMap<Pid, Box<Process<Msg=T, SystemUserMsg=U>>>,
-    system_senders: HashMap<Pid, amy::Sender<SystemEnvelope<U>>>,
-    tx: Sender<ExecutorMsg<T, U>>,
-    rx: Receiver<ExecutorMsg<T, U>>,
+    processes: HashMap<Pid, Box<Process<Msg=T>>>,
+    thread_senders: HashMap<Pid, amy::Sender<Envelope<T>>>,
+    tx: Sender<ExecutorMsg<T>>,
+    rx: Receiver<ExecutorMsg<T>>,
     cluster_tx: Sender<ClusterMsg<T>>,
     logger: slog::Logger,
 }
 
-impl<T: Encodable + Decodable + Send, U: Debug> Executor<T, U> {
+impl<T: Encodable + Decodable + Send + Debug + Clone> Executor<T> {
     pub fn new(node: NodeId,
-               tx: Sender<ExecutorMsg<T, U>>,
-               rx: Receiver<ExecutorMsg<T, U>>,
+               tx: Sender<ExecutorMsg<T>>,
+               rx: Receiver<ExecutorMsg<T>>,
                cluster_tx: Sender<ClusterMsg<T>>,
-               logger: slog::Logger) -> Executor<T, U> {
+               logger: slog::Logger) -> Executor<T> {
         let pid = Pid {
             group: Some("rabble".to_string()),
             name: "Executor".to_string(),
@@ -41,7 +41,7 @@ impl<T: Encodable + Decodable + Send, U: Debug> Executor<T, U> {
             pid: pid,
             node: node,
             processes: HashMap::new(),
-            system_senders: HashMap::new(),
+            thread_senders: HashMap::new(),
             tx: tx,
             rx: rx,
             cluster_tx: cluster_tx,
@@ -55,11 +55,11 @@ impl<T: Encodable + Decodable + Send, U: Debug> Executor<T, U> {
     pub fn run(mut self) {
         while let Ok(msg) = self.rx.recv() {
             match msg {
-                ExecutorMsg::User(envelope) => self.route(envelope),
+                ExecutorMsg::Envelope(envelope) => self.route(envelope),
                 ExecutorMsg::Start(pid, process) => self.start(pid, process),
                 ExecutorMsg::Stop(pid) => self.stop(pid),
                 ExecutorMsg::RegisterSystemThread(pid, tx) => {
-                    self.system_senders.insert(pid, tx);
+                    self.thread_senders.insert(pid, tx);
                 },
                 ExecutorMsg::GetStatus(correlation_id) => self.get_status(correlation_id),
 
@@ -72,18 +72,18 @@ impl<T: Encodable + Decodable + Send, U: Debug> Executor<T, U> {
     fn get_status(&self, correlation_id: CorrelationId) {
         let status = ExecutorStatus {
             total_processes: self.processes.len(),
-            system_threads: self.system_senders.keys().cloned().collect()
+            system_threads: self.thread_senders.keys().cloned().collect()
         };
-        let envelope = SystemEnvelope {
+        let envelope = Envelope {
             to: correlation_id.pid.clone(),
             from: self.pid.clone(),
-            msg: SystemMsg::ExecutorStatus(status),
+            msg: Msg::ExecutorStatus(status),
             correlation_id: Some(correlation_id)
         };
         self.route_to_thread(envelope);
     }
 
-    fn start(&mut self, pid: Pid, process: Box<Process<Msg=T, SystemUserMsg=U>>) {
+    fn start(&mut self, pid: Pid, process: Box<Process<Msg=T>>) {
         self.processes.insert(pid, process);
     }
 
@@ -95,40 +95,45 @@ impl<T: Encodable + Decodable + Send, U: Debug> Executor<T, U> {
     ///
     /// Retrieve any envelopes from processes handling local messages and put them on either the
     /// executor or the cluster channel depending upon whether they are local or remote.
-    fn route(&mut self, envelope: Envelope<T, U>) {
-        match envelope {
-            Envelope::Process(process_envelope) => self.route_to_process(process_envelope),
-            Envelope::System(system_envelope) => self.route_to_thread(system_envelope)
+    ///
+    /// Note that all envelopes sent to an executor are sent from the local cluster server and must
+    /// be addressed to local processes.
+    fn route(&mut self, envelope: Envelope<T>) {
+        if self.node != envelope.to.node {
+            let _ = self.cluster_tx.send(ClusterMsg::Envelope(envelope));
+            return;
+        }
+        if let Err(envelope) = self.route_to_process(envelope) {
+            self.route_to_thread(envelope);
         }
     }
 
-    fn route_to_process(&mut self, envelope: ProcessEnvelope<T>) {
-        let ProcessEnvelope {to, from, msg, correlation_id} = envelope;
-        if let Some(process) = self.processes.get_mut(&to) {
+    /// Route an envelope to a process if it exists on this node.
+    ///
+    /// Return Ok(()) if the process exists, Err(envelope) otherwise.
+    fn route_to_process(&mut self, envelope: Envelope<T>) -> Result<(), Envelope<T>> {
+        if let Some(process) = self.processes.get_mut(&envelope.to) {
+            let Envelope {to, from, msg, correlation_id} = envelope;
             for envelope in process.handle(msg, from, correlation_id).drain(..) {
-                if envelope.to().node == self.node {
+                if envelope.to.node == self.node {
                     // This won't ever fail because we hold a ref to both ends of the channel
-                    self.tx.send(ExecutorMsg::User(envelope)).unwrap();
+                    self.tx.send(ExecutorMsg::Envelope(envelope)).unwrap();
                 } else {
-                    if let Envelope::Process(process_envelope) = envelope {
-                        // Return if the cluster server thread has exited
-                        // The system is shutting down.
-                        if let Err(_) = self.cluster_tx.send(ClusterMsg::User(process_envelope)) {
-                            return;
-                        }
-                    } else {
-                        // TODO: Log error. We are trying to send a SystemEnvelope remotely
-                    }
+                    let _ = self.cluster_tx.send(ClusterMsg::Envelope(envelope));
                 }
             }
+            return Ok(());
         }
+        Err(envelope)
     }
 
-    fn route_to_thread(&self, envelope: SystemEnvelope<U>) {
-        if let Some(tx) = self.system_senders.get(&envelope.to) {
+    /// Route an envelope to a system thread on this node
+    fn route_to_thread(&self, envelope: Envelope<T>) {
+        if let Some(tx) = self.thread_senders.get(&envelope.to) {
             tx.send(envelope).unwrap();
         } else {
-            // TODO: Logging
+            warn!(self.logger, "Failed to find system thread: {}";
+                  "pid" => envelope.to.to_string());
         }
     }
 }

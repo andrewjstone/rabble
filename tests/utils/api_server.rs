@@ -5,10 +5,8 @@ use rabble::{
     Pid,
     Node,
     Envelope,
-    SystemEnvelope,
-    ProcessEnvelope,
     CorrelationId,
-    SystemMsg,
+    Msg,
     MsgpackSerializer,
     TcpServerHandler,
     Service,
@@ -16,12 +14,12 @@ use rabble::{
     ConnectionHandler
 };
 
-use super::messages::{ProcessMsg, SystemUserMsg, ApiClientMsg};
+use super::messages::{RabbleUserMsg, ApiClientMsg};
 
 const API_SERVER_IP: &'static str  = "127.0.0.1:12001";
 
-pub fn start(node: Node<ProcessMsg, SystemUserMsg>)
-    -> (Pid, Sender<SystemEnvelope<SystemUserMsg>>, JoinHandle<()>)
+pub fn start(node: Node<RabbleUserMsg>)
+    -> (Pid, Sender<Envelope<RabbleUserMsg>>, JoinHandle<()>)
 {
     let server_pid = Pid {
         name: "api-server".to_string(),
@@ -50,8 +48,7 @@ pub struct ApiServerConnectionHandler {
 }
 
 impl ConnectionHandler for ApiServerConnectionHandler {
-    type ProcessMsg = ProcessMsg;
-    type SystemUserMsg = SystemUserMsg;
+    type Msg = RabbleUserMsg;
     type ClientMsg = ApiClientMsg;
 
     fn new(pid: Pid, id: usize) -> ApiServerConnectionHandler {
@@ -63,16 +60,16 @@ impl ConnectionHandler for ApiServerConnectionHandler {
         }
     }
 
-    fn handle_system_envelope(&mut self, envelope: SystemEnvelope<SystemUserMsg>)
+    fn handle_envelope(&mut self, envelope: Envelope<RabbleUserMsg>)
         -> &mut Vec<ConnectionMsg<ApiServerConnectionHandler>>
     {
-        let SystemEnvelope {msg, correlation_id, ..} = envelope;
+        let Envelope {msg, correlation_id, ..} = envelope;
         let correlation_id = correlation_id.unwrap();
         match msg {
-            SystemMsg::User(SystemUserMsg::History(h)) => {
+            Msg::User(RabbleUserMsg::History(h)) => {
                 self.output.push(ConnectionMsg::Client(ApiClientMsg::History(h), correlation_id));
             },
-            SystemMsg::User(SystemUserMsg::OpComplete) => {
+            Msg::User(RabbleUserMsg::OpComplete) => {
                 self.output.push(ConnectionMsg::Client(ApiClientMsg::OpComplete, correlation_id));
             },
             _ => ()
@@ -85,10 +82,10 @@ impl ConnectionHandler for ApiServerConnectionHandler {
     {
         match msg {
             ApiClientMsg::Op(pid, val) => {
-                self.push_new_process_envelope(pid, ProcessMsg::Op(val));
+                self.push_new_envelope(pid, RabbleUserMsg::Op(val));
             },
             ApiClientMsg::GetHistory(pid) => {
-                self.push_new_process_envelope(pid, ProcessMsg::GetHistory);
+                self.push_new_envelope(pid, RabbleUserMsg::GetHistory);
             }
 
             // We only handle client requests. Client replies come in as SystemEnvelopes
@@ -99,15 +96,11 @@ impl ConnectionHandler for ApiServerConnectionHandler {
 }
 
 impl ApiServerConnectionHandler {
-    pub fn push_new_process_envelope(&mut self, to: Pid, msg: ProcessMsg) {
+    pub fn push_new_envelope(&mut self, to: Pid, user_msg: RabbleUserMsg) {
+        let msg = Msg::User(user_msg);
         let correlation_id = CorrelationId::request(self.pid.clone(), self.id, self.total_requests);
         self.total_requests += 1;
-        let envelope = Envelope::Process(ProcessEnvelope {
-            to: to,
-            from: self.pid.clone(),
-            msg: msg,
-            correlation_id: Some(correlation_id)
-        });
+        let envelope = Envelope::new(to, self.pid.clone(), msg, Some(correlation_id));
         self.output.push(ConnectionMsg::Envelope(envelope));
     }
 }

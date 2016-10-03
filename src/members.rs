@@ -1,9 +1,10 @@
 use std::collections::HashSet;
 use std::fmt::{Display, Formatter, Error};
+use rustc_serialize::{Encodable, Decodable};
 use orset::ORSet;
 use node_id::NodeId;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq, RustcEncodable, RustcDecodable)]
 pub struct Members {
     pub me: NodeId,
     orset: ORSet<NodeId>

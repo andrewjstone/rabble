@@ -3,22 +3,18 @@ use std::fmt::Debug;
 use std::os::unix::io::AsRawFd;
 use rustc_serialize::{Encodable, Decodable};
 use node::Node;
-use envelope::{Envelope, SystemEnvelope};
+use envelope::Envelope;
 use errors::*;
 use correlation_id::CorrelationId;
 use pid::Pid;
 
 /// Implement this for a specific connection handler
 pub trait ConnectionHandler : Sized {
-    type ProcessMsg: Encodable + Decodable;
-    type SystemUserMsg: Debug + Clone;
+    type Msg: Encodable + Decodable + Debug + Clone;
     type ClientMsg: Encodable + Decodable + Debug;
 
     fn new(pid: Pid, id: usize) -> Self;
-
-    fn handle_system_envelope(&mut self,
-                              SystemEnvelope<Self::SystemUserMsg>) -> &mut Vec<ConnectionMsg<Self>>;
-
+    fn handle_envelope(&mut self, Envelope<Self::Msg>) -> &mut Vec<ConnectionMsg<Self>>;
     fn handle_network_msg(&mut self, Self::ClientMsg) -> &mut Vec<ConnectionMsg<Self>>;
 }
 
@@ -29,6 +25,6 @@ pub trait ConnectionHandler : Sized {
 /// connection.
 pub enum ConnectionMsg<C: ConnectionHandler>
 {
-    Envelope(Envelope<C::ProcessMsg, C::SystemUserMsg>),
+    Envelope(Envelope<C::Msg>),
     Client(C::ClientMsg, CorrelationId)
 }
