@@ -17,11 +17,9 @@ extern crate time;
 
 mod utils;
 
-use std::{str, thread};
-use std::thread::JoinHandle;
-use amy::{Poller, Receiver, Sender};
-use slog::DrainExt;
-use time::{SteadyTime, Duration};
+use std::str;
+use amy::{Poller, Receiver};
+use time::Duration;
 
 use utils::messages::*;
 use utils::{
@@ -32,12 +30,9 @@ use utils::{
 
 use rabble::{
     Pid,
-    NodeId,
     Envelope,
     Msg,
     ClusterStatus,
-    MsgpackSerializer,
-    Serialize,
     Node,
     CorrelationId
 };
@@ -53,12 +48,12 @@ fn join_leave() {
         node: node_ids[0].clone()
     };
 
-    let (nodes, mut handles) = start_nodes(NUM_NODES);
+    let (nodes, handles) = start_nodes(NUM_NODES);
 
     // We create an amy channel so that we can pretend this test is a system service.
     // We register the sender with all nodes so that we can check the responses to admin calls
     // like node.get_cluster_status().
-    let mut poller = Poller::new().unwrap();
+    let poller = Poller::new().unwrap();
     let (test_tx, test_rx) = poller.get_registrar().channel().unwrap();
     for node in &nodes {
         node.register_system_thread(&test_pid, &test_tx).unwrap();
@@ -92,6 +87,14 @@ fn join_leave() {
     nodes[0].leave(&nodes[0].id).unwrap();
     assert!(wait_for_cluster_status(&nodes[0], &test_pid, &test_rx, 0));
     assert!(wait_for_cluster_status(&nodes[2], &test_pid, &test_rx, 0));
+
+    for node in nodes {
+        node.shutdown();
+    }
+
+    for h in handles {
+        h.join().unwrap();
+    }
 }
 
 fn wait_for_cluster_status(node: &Node<RabbleUserMsg>,
@@ -105,7 +108,7 @@ fn wait_for_cluster_status(node: &Node<RabbleUserMsg>,
         let correlation_id = CorrelationId::pid(test_pid.clone());
         node.cluster_status(correlation_id.clone()).unwrap();
         if let Ok(envelope) = test_rx.try_recv() {
-            if let Msg::ClusterStatus(ClusterStatus{connected, members, ..}) = envelope.msg {
+            if let Msg::ClusterStatus(ClusterStatus{connected, ..}) = envelope.msg {
                 if connected.len() == num_connected {
                     return true;
                 }

@@ -9,6 +9,7 @@ use rabble::{
 use super::messages::RabbleUserMsg;
 
 /// A participant in chain replication
+#[allow(dead_code)] // Not used in all tests
 pub struct Replica {
     pid: Pid,
     next: Option<Pid>,
@@ -16,6 +17,7 @@ pub struct Replica {
     output: Vec<Envelope<RabbleUserMsg>>
 }
 
+#[allow(dead_code)] // Not used in all tests
 impl Replica {
     pub fn new(pid: Pid, next: Option<Pid>) -> Replica {
         Replica {

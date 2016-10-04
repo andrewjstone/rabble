@@ -2,11 +2,9 @@ extern crate rabble;
 #[macro_use]
 extern crate assert_matches;
 
-
 use std::thread;
 
 use rabble::{
-    rouse,
     NodeId,
     Service,
     ThreadHandler,
@@ -34,4 +32,10 @@ fn single_service_and_handler_get_executor_status() {
     thread::spawn(move || {
         service.wait();
     });
+
+    node.shutdown();
+
+    for h in handles {
+        h.join().unwrap();
+    }
 }

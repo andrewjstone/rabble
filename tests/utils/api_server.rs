@@ -16,8 +16,10 @@ use rabble::{
 
 use super::messages::{RabbleUserMsg, ApiClientMsg};
 
+#[allow(dead_code)] // Not used in all tests
 const API_SERVER_IP: &'static str  = "127.0.0.1:12001";
 
+#[allow(dead_code)] // Not used in all tests
 pub fn start(node: Node<RabbleUserMsg>)
     -> (Pid, Sender<Envelope<RabbleUserMsg>>, JoinHandle<()>)
 {

@@ -8,9 +8,8 @@ pub mod replica;
 pub mod api_server;
 pub mod messages;
 
-
 use std::thread::{self, JoinHandle};
-use self::slog::{OwnedKeyValueList, DrainExt};
+use self::slog::DrainExt;
 use self::time::{SteadyTime, Duration};
 use utils::messages::*;
 use rabble::{
@@ -24,6 +23,7 @@ use rabble::{
 /// After each call of `f()` that returns `false`, sleep for `sleep_time`
 /// Returns true if `f()` returns true before the timeout expires
 /// Returns false if the runtime of the test exceeds `timeout`
+#[allow(dead_code)] // Not used in all tests
 pub fn wait_for<F>(sleep_time: Duration, timeout: Duration, mut f: F) -> bool
     where F: FnMut() -> bool
 {
@@ -37,6 +37,7 @@ pub fn wait_for<F>(sleep_time: Duration, timeout: Duration, mut f: F) -> bool
     true
 }
 
+#[allow(dead_code)] // Not used in all tests
 pub fn create_node_ids(n: usize) -> Vec<NodeId> {
     (1..n + 1).map(|n| {
         NodeId {
@@ -46,6 +47,7 @@ pub fn create_node_ids(n: usize) -> Vec<NodeId> {
     }).collect()
 }
 
+#[allow(dead_code)] // Not used in all tests
 pub fn start_nodes(n: usize) -> (Vec<Node<RabbleUserMsg>>, Vec<JoinHandle<()>>) {
     let term = slog_term::streamer().build();
     let drain = slog_envlogger::LogBuilder::new(term)
