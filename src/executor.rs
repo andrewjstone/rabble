@@ -130,7 +130,7 @@ impl<T: Encodable + Decodable + Send + Debug + Clone> Executor<T> {
     /// Route an envelope to a system thread on this node
     fn route_to_thread(&self, envelope: Envelope<T>) {
         if let Some(tx) = self.thread_senders.get(&envelope.to) {
-            tx.send(envelope).unwrap();
+            let _ = tx.send(envelope);
         } else {
             warn!(self.logger, "Failed to find system thread: {}";
                   "pid" => envelope.to.to_string());

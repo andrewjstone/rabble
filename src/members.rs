@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::fmt::{Display, Formatter, Error};
 use rustc_serialize::{Encodable, Decodable};
-use orset::ORSet;
+use orset::{ORSet, Delta};
 use node_id::NodeId;
 
 #[derive(Debug, Clone, Eq, PartialEq, RustcEncodable, RustcDecodable)]
@@ -39,11 +39,23 @@ impl Members {
         self.orset.join_state(other);
     }
 
+    /// Returns None if this node has not ever seen an add of the element
+    pub fn leave(&mut self, leaving: NodeId) -> Option<Delta<NodeId>> {
+        if let Some(dots) = self.orset.seen(&leaving) {
+            return Some(self.orset.remove(leaving, dots));
+        }
+        None
+    }
+
+    pub fn join_delta(&mut self, delta: Delta<NodeId>) -> bool {
+        self.orset.join(delta)
+    }
+
     pub fn get_orset(&self) -> ORSet<NodeId> {
         self.orset.clone()
     }
 
-    pub fn add(&mut self, element: NodeId) {
-        self.orset.add(element);
+    pub fn add(&mut self, element: NodeId) -> Delta<NodeId> {
+        self.orset.add(element)
     }
 }

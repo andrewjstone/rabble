@@ -64,6 +64,13 @@ impl<T: Encodable + Decodable + Debug + Clone> Node<T> {
               format!("ClusterMsg::Join({:?})", *node_id))
     }
 
+    pub fn leave(&self, node_id: &NodeId) -> Result<()> {
+        send!(self.cluster_tx,
+              ClusterMsg::Leave(node_id.clone()),
+              None,
+              format!("ClusterMsg::Leave({:?})", *node_id))
+    }
+
     /// Add a process to the executor that can be sent Envelopes addressed to its pid
     pub fn spawn(&self, pid: &Pid, process: Box<Process<Msg=T>>) -> Result<()> {
         send!(self.executor_tx,

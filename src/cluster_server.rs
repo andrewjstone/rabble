@@ -17,7 +17,7 @@ use executor_msg::ExecutorMsg;
 use external_msg::ExternalMsg;
 use timer_wheel::TimerWheel;
 use envelope::Envelope;
-use orset::ORSet;
+use orset::{ORSet, Delta};
 use pid::Pid;
 use cluster_status::ClusterStatus;
 use correlation_id::CorrelationId;
@@ -132,6 +132,7 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
             ClusterMsg::PollNotifications(notifications) =>
                 self.handle_poll_notifications(notifications),
             ClusterMsg::Join(node) => self.join(node),
+            ClusterMsg::Leave(node) => self.leave(node),
             ClusterMsg::Envelope(envelope) => self.send_remote(envelope),
             ClusterMsg::GetStatus(correlation_id) => self.get_status(correlation_id),
             ClusterMsg::Shutdown => Err(ErrorKind::Shutdown(self.pid.clone()).into())
@@ -247,6 +248,13 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
                     return Err(ErrorKind::SendError("ExecutorMsg::Enelope".to_string(),
                                                     Some(envelope.to)).into());
                 }
+            },
+            ExternalMsg::Delta(delta) => {
+                debug!(self.logger, "Got Delta mutator";
+                       "id" => id, "delta" => format!("{:?}", delta));
+                if self.members.join_delta(delta.clone()) {
+                    try!(self.broadcast_delta(delta));
+                }
             }
         }
         Ok(())
@@ -330,8 +338,16 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
     }
 
     fn join(&mut self, node: NodeId) -> Result<()> {
-        self.members.add(node.clone());
+        let delta = self.members.add(node.clone());
+        try!(self.broadcast_delta(delta));
         self.connect(node)
+    }
+
+    fn leave(&mut self, node: NodeId) -> Result<()> {
+        if let Some(delta) = self.members.leave(node.clone()) {
+            try!(self.broadcast_delta(delta));
+        }
+        Ok(())
     }
 
     fn connect(&mut self, node: NodeId) -> Result<()> {
@@ -413,6 +429,15 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
                 info!(self.logger, "Closing unestablished connection"; "id" => id);
             }
         }
+    }
+
+    fn broadcast_delta(&mut self, delta: Delta<NodeId>) -> Result<()> {
+        debug!(self.logger, "Broadcasting delta"; "delta" => format!("{:?}", delta));
+        let mut encoded = Vec::new();
+        let msg = ExternalMsg::Delta::<T>(delta);
+        try!(msg.encode(&mut Encoder::new(&mut encoded))
+             .chain_err(|| ErrorKind::EncodeError(None, None)));
+        self.broadcast(encoded)
     }
 
     fn broadcast_pings(&mut self) -> Result<()> {

@@ -10,6 +10,7 @@ use correlation_id::CorrelationId;
 pub enum ClusterMsg<T: Encodable + Decodable + Debug + Clone> {
     PollNotifications(Vec<Notification>),
     Join(NodeId),
+    Leave(NodeId),
     Envelope(Envelope<T>),
     GetStatus(CorrelationId),
     Shutdown

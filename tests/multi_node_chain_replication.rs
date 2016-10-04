@@ -16,20 +16,21 @@ extern crate time;
 mod utils;
 
 use std::{str, thread};
-use std::thread::JoinHandle;
 use std::net::TcpStream;
 use amy::{Poller, Receiver, Sender};
-use slog::DrainExt;
 use time::{SteadyTime, Duration};
 
 use utils::messages::*;
 use utils::replica::Replica;
 use utils::api_server;
-use utils::wait_for;
+use utils::{
+    wait_for,
+    create_node_ids,
+    start_nodes
+};
 
 use rabble::{
     Pid,
-    NodeId,
     Envelope,
     Msg,
     ClusterStatus,
@@ -40,6 +41,7 @@ use rabble::{
 };
 
 const API_SERVER_IP: &'static str = "127.0.0.1:12001";
+const NUM_NODES: usize = 3;
 
 type CrNode = Node<RabbleUserMsg>;
 type CrReceiver = Receiver<Envelope<RabbleUserMsg>>;
@@ -47,14 +49,14 @@ type CrSender = Sender<Envelope<RabbleUserMsg>>;
 
 #[test]
 fn chain_replication() {
-    let node_ids = create_node_ids();
+    let node_ids = create_node_ids(NUM_NODES);
     let test_pid = Pid {
         name: "test-runner".to_string(),
         group: None,
         node: node_ids[0].clone()
     };
 
-    let (nodes, mut handles) = start_nodes();
+    let (nodes, mut handles) = start_nodes(NUM_NODES);
 
     // We create an amy channel so that we can pretend this test is a system service.
     // We register the sender with node1 so that we can check the responses to admin calls
@@ -81,21 +83,6 @@ fn chain_replication() {
     for h in handles {
         h.join().unwrap();
     }
-}
-
-fn start_nodes() -> (Vec<CrNode>, Vec<JoinHandle<()>>) {
-    let term = slog_term::streamer().build();
-    let drain = slog_envlogger::LogBuilder::new(term)
-        .filter(None, slog::FilterLevel::Debug).build();
-    let root_logger = slog::Logger::root(drain.fuse(), o!());
-    slog_stdlog::set_logger(root_logger.clone()).unwrap();
-    create_node_ids().into_iter().fold((Vec::new(), Vec::new()),
-                                  |(mut nodes, mut handles), node_id| {
-        let (node, handle_list) = rabble::rouse(node_id, Some(root_logger.clone()));
-        nodes.push(node);
-        handles.extend(handle_list);
-        (nodes, handles)
-    })
 }
 
 fn spawn_replicas(nodes: &Vec<CrNode>, pids: &Vec<Pid>) {
@@ -131,7 +118,7 @@ fn run_client_operations(pid: &Pid) {
             assert_matches!(serializer.write_msgs(&mut sock, Some(&ApiClientMsg::Op(pid, i))),
                             Ok(true));
             sock.set_nonblocking(true).unwrap();
-            assert_eq!(true, utils::wait_for(sleep_time, timeout, || {
+            assert_eq!(true, wait_for(sleep_time, timeout, || {
                 if let Ok(Some(ApiClientMsg::OpComplete)) = serializer.read_msg(&mut sock) {
                     return true;
                 }
@@ -227,15 +214,6 @@ fn create_replica_pids(nodes: &Vec<CrNode>) -> Vec<Pid> {
             name: name.to_string(),
             group: None,
             node: node.id.clone()
-        }
-    }).collect()
-}
-
-fn create_node_ids() -> Vec<NodeId> {
-    (1..4).map(|n| {
-        NodeId {
-            name: format!("node{}", n),
-            addr: format!("127.0.0.1:1100{}", n)
         }
     }).collect()
 }
