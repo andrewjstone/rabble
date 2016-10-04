@@ -4,6 +4,6 @@ use members::Members;
 
 #[derive(Debug, Clone, Eq, PartialEq, RustcEncodable, RustcDecodable)]
 pub struct ClusterStatus {
-    pub members: Members,
+    pub members: HashSet<NodeId>,
     pub connected: HashSet<NodeId>
 }

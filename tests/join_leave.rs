@@ -105,7 +105,7 @@ fn wait_for_cluster_status(node: &Node<RabbleUserMsg>,
         let correlation_id = CorrelationId::pid(test_pid.clone());
         node.cluster_status(correlation_id.clone()).unwrap();
         if let Ok(envelope) = test_rx.try_recv() {
-            if let Msg::ClusterStatus(ClusterStatus{connected, ..}) = envelope.msg {
+            if let Msg::ClusterStatus(ClusterStatus{connected, members, ..}) = envelope.msg {
                 if connected.len() == num_connected {
                     return true;
                 }

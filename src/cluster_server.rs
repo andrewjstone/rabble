@@ -141,7 +141,7 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
 
     fn get_status(&self, correlation_id: CorrelationId) -> Result<()> {
         let status = ClusterStatus {
-            members: self.members.clone(),
+            members: self.members.all(),
             connected: self.established.keys().cloned().collect()
         };
         let envelope = Envelope {
@@ -469,10 +469,21 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
     // Ensure connections are correct based on membership state
     fn check_connections(&mut self) {
         let all = self.members.all();
+
+        // If this node is no longer a member of the cluster disconnect from all nodes
+        if !all.contains(&self.node) {
+            return self.disconnect_all();
+        }
+
         let connected: HashSet<NodeId> = self.established.keys().cloned().collect();
         let to_connect: Vec<NodeId> = all.difference(&connected)
                                        .filter(|&node| *node != self.node).cloned().collect();
         let to_disconnect: Vec<NodeId> = connected.difference(&all).cloned().collect();
+
+        debug!(self.logger, "check_connections";
+               "to_connect" => format!("{:?}", to_connect),
+               "to_disconnect" => format!("{:?}", to_disconnect));
+
 
         for node in to_connect {
             self.connect(node);
@@ -481,18 +492,29 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
         self.disconnect_established(to_disconnect);
     }
 
-   fn disconnect_established(&mut self, to_disconnect: Vec<NodeId>) {
-       for node in to_disconnect {
-           if let Some(id) = self.established.remove(&node) {
-               let conn = self.connections.remove(&id).unwrap();
-               self.timer_wheel.remove(&id, conn.timer_wheel_index);
-               if let Err(e) = self.registrar.deregister(conn.sock) {
-                   error!(self.logger, "Failed to deregister socket";
-                          "id" => id, "peer" => conn.node.unwrap().to_string());
-               }
-           }
-       }
-   }
+    fn disconnect_all(&mut self) {
+        self.established = HashMap::new();
+        for (id, conn) in self.connections.drain() {
+            self.timer_wheel.remove(&id, conn.timer_wheel_index);
+            if let Err(e) = self.registrar.deregister(conn.sock) {
+                error!(self.logger, "Failed to deregister socket";
+                       "id" => id, "peer" => format!("{:?}", conn.node));
+            }
+        }
+    }
+
+    fn disconnect_established(&mut self, to_disconnect: Vec<NodeId>) {
+        for node in to_disconnect {
+            if let Some(id) = self.established.remove(&node) {
+                let conn = self.connections.remove(&id).unwrap();
+                self.timer_wheel.remove(&id, conn.timer_wheel_index);
+                if let Err(e) = self.registrar.deregister(conn.sock) {
+                    error!(self.logger, "Failed to deregister socket";
+                           "id" => id, "peer" => conn.node.unwrap().to_string());
+                }
+            }
+        }
+    }
 }
 
 fn write_error(e: std::io::Error, id: usize, node: &Option<NodeId>) -> Error {
