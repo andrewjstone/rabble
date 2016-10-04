@@ -1,4 +1,4 @@
-use std::sync::mpsc::{Sender, SendError};
+use std::sync::mpsc::Sender;
 use std::fmt::Debug;
 use rustc_serialize::{Encodable, Decodable};
 use node_id::NodeId;
@@ -119,7 +119,7 @@ impl<T: Encodable + Decodable + Debug + Clone> Node<T> {
 
     /// Shutdown the node
     pub fn shutdown(&self) {
-        self.executor_tx.send(ExecutorMsg::Shutdown);
-        self.cluster_tx.send(ClusterMsg::Shutdown);
+        let _ = self.executor_tx.send(ExecutorMsg::Shutdown);
+        let _ = self.cluster_tx.send(ClusterMsg::Shutdown);
     }
 }

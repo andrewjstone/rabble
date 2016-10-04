@@ -1,9 +1,6 @@
-use std::fmt::Debug;
-use std::marker::PhantomData;
 use std::net::{TcpListener, TcpStream};
 use std::collections::HashMap;
 use std::io;
-use rustc_serialize::{Encodable, Decodable};
 use amy::{Registrar, Notification, Event, Timer};
 use errors::*;
 use service_handler::ServiceHandler;
@@ -27,8 +24,7 @@ struct Connection<C, S>
     handler: C,
     serializer: S,
     sock: TcpStream,
-    timer_wheel_slot: usize,
-    stats: ConnectionStats
+    timer_wheel_slot: usize
 }
 
 impl<C, S> Connection<C, S>
@@ -45,26 +41,7 @@ impl<C, S> Connection<C, S>
             handler: handler,
             serializer: S::new(),
             sock: sock,
-            timer_wheel_slot: slot,
-            stats: ConnectionStats::new()
-        }
-    }
-}
-
-struct ConnectionStats {
-    pub total_network_msgs_sent: usize,
-    pub total_network_msgs_received: usize,
-    pub total_system_envelopes_received: usize,
-    pub total_system_requests_sent: usize
-}
-
-impl ConnectionStats {
-    pub fn new() -> ConnectionStats {
-        ConnectionStats {
-            total_network_msgs_sent: 0,
-            total_network_msgs_received: 0,
-            total_system_envelopes_received: 0,
-            total_system_requests_sent: 0
+            timer_wheel_slot: slot
         }
     }
 }
@@ -75,7 +52,6 @@ pub struct TcpServerHandler<C, S>
           S: Serialize
 {
     pid: Pid,
-    total_connections: usize,
     listener: TcpListener,
     listener_id: usize,
     connections: HashMap<usize, Connection<C, S>>,
@@ -112,7 +88,6 @@ impl <C,S> TcpServerHandler<C, S>
         listener.set_nonblocking(true).unwrap();
         TcpServerHandler {
             pid: pid,
-            total_connections: 0,
             listener: listener,
             listener_id: 0,
             connections: HashMap::new(),
@@ -129,7 +104,7 @@ impl <C,S> TcpServerHandler<C, S>
         loop {
             match self.listener.accept() {
                 Ok((socket, _)) => {
-                    self.new_connection(socket, registrar);
+                    try!(self.new_connection(socket, registrar));
                 },
                 Err(e) => {
                     if e.kind() == io::ErrorKind::WouldBlock {
@@ -157,8 +132,7 @@ impl <C,S> TcpServerHandler<C, S>
 
     fn handle_connection_notification(&mut self,
                                       notification: &Notification,
-                                      node: &Node<C::Msg>,
-                                      registrar: &Registrar) -> Result<()>
+                                      node: &Node<C::Msg>) -> Result<()>
     {
         if let Some(connection) = self.connections.get_mut(&notification.id) {
             if notification.event.writable() {
@@ -168,7 +142,7 @@ impl <C,S> TcpServerHandler<C, S>
             }
 
             if notification.event.readable() {
-                try!(handle_readable(connection, &mut self.request_timer_wheel, node, registrar));
+                try!(handle_readable(connection, &mut self.request_timer_wheel, node));
                 update_connection_timeout(connection, &mut self.connection_timer_wheel);
             }
         }
@@ -185,10 +159,7 @@ impl <C,S> TcpServerHandler<C, S>
     }
 
     /// Handle request timer events and see if any requests have timed out.
-    fn request_tick(&mut self,
-                    node: &Node<C::Msg>,
-                    registrar: &Registrar) -> Result<()>
-    {
+    fn request_tick(&mut self, node: &Node<C::Msg>) -> Result<()>{
         for correlation_id in self.request_timer_wheel.expire() {
             let conn_id = correlation_id.connection.as_ref().unwrap();
             if let Some(mut connection) = self.connections.get_mut(&conn_id) {
@@ -218,7 +189,7 @@ impl<C, S> ServiceHandler<C::Msg> for TcpServerHandler<C, S>
     /// Initialize the state of the handler: Register timers and tcp listen socket
     fn init(&mut self,
             registrar: &Registrar,
-            node: &Node<C::Msg>) -> Result<()>
+            _node: &Node<C::Msg>) -> Result<()>
     {
         self.listener_id = try!(registrar.register(&self.listener, Event::Read)
                                 .chain_err(|| "Failed to register listener"));
@@ -246,7 +217,7 @@ impl<C, S> ServiceHandler<C::Msg> for TcpServerHandler<C, S>
         }
 
         if notification.id == self.request_timer.get_id() {
-            return self.request_tick(&node, &registrar);
+            return self.request_tick(&node);
         }
 
         if self.connection_timer.is_some()
@@ -256,7 +227,7 @@ impl<C, S> ServiceHandler<C::Msg> for TcpServerHandler<C, S>
             return Ok(());
         }
 
-        if let Err(e) = self.handle_connection_notification(&notification, &node, &registrar) {
+        if let Err(e) = self.handle_connection_notification(&notification, &node) {
             println!("Handle connection notification error = {:?}", e);
             // Unwrap is correct here since the above call only fails if the connection exists
             let connection = self.connections.remove(&notification.id).unwrap();
@@ -271,7 +242,7 @@ impl<C, S> ServiceHandler<C::Msg> for TcpServerHandler<C, S>
     fn handle_envelope(&mut self,
                        node: &Node<C::Msg>,
                        envelope: Envelope<C::Msg>,
-                       registrar: &Registrar) -> Result<()>
+                       _registrar: &Registrar) -> Result<()>
     {
         if envelope.correlation_id.is_none() {
             return Err(format!("No correlation id for envelope {:?}", envelope).into());
@@ -280,7 +251,6 @@ impl<C, S> ServiceHandler<C::Msg> for TcpServerHandler<C, S>
         // the request has already received its reply
         let conn_id = envelope.correlation_id.as_ref().unwrap().connection.as_ref().cloned().unwrap();
         if let Some(mut connection) = self.connections.get_mut(&conn_id) {
-            let correlation_id = envelope.correlation_id.as_ref().unwrap().clone();
             let responses = connection.handler.handle_envelope(envelope);
             try!(handle_connection_msgs(&mut self.request_timer_wheel,
                                         responses,
@@ -296,8 +266,7 @@ impl<C, S> ServiceHandler<C::Msg> for TcpServerHandler<C, S>
 /// Handle any readable notifications.
 fn handle_readable<C, S>(connection: &mut Connection<C, S>,
                       request_timer_wheel: &mut TimerWheel<CorrelationId>,
-                      node: &Node<C::Msg>,
-                      registrar: &Registrar) -> Result<()>
+                      node: &Node<C::Msg>) -> Result<()>
     where C: ConnectionHandler<ClientMsg=S::Msg>,
           S: Serialize
 {
@@ -341,9 +310,9 @@ fn handle_connection_msgs<C, S>(request_timer_wheel: &mut TimerWheel<Correlation
                 if envelope.correlation_id.is_some() {
                     request_timer_wheel.insert(envelope.correlation_id.as_ref().unwrap().clone());
                 }
-                node.send(envelope);
+                let _ = node.send(envelope);
             },
-            ConnectionMsg::Client(client_msg, correlation_id) => {
+            ConnectionMsg::Client(client_msg, _) => {
                 // Respond to the client
                 try!(serializer.write_msgs(sock, Some(&client_msg))
                      .chain_err(|| format!("Failed to write client msg: {:?}",

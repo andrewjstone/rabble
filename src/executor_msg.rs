@@ -1,4 +1,3 @@
-use std::sync::mpsc::Sender;
 use std::fmt::Debug;
 use rustc_serialize::{Encodable, Decodable};
 use envelope::Envelope;

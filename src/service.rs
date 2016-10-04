@@ -1,12 +1,9 @@
-use std::sync::mpsc::{channel, Sender, Receiver};
-use std::collections::HashMap;
 use std::fmt::Debug;
 use std; // needed for slog
-use amy::{self, Poller, Registrar, Notification};
+use amy::{self, Poller, Registrar};
 use pid::Pid;
 use rustc_serialize::{Encodable, Decodable};
 use msg::Msg;
-use cluster_msg::ClusterMsg;
 use service_handler::ServiceHandler;
 use envelope::Envelope;
 use node::Node;
@@ -20,7 +17,6 @@ pub struct Service<T, H>
           H: ServiceHandler<T>
 {
     pub pid: Pid,
-    request_count: usize,
     pub tx: amy::Sender<Envelope<T>>,
     rx: amy::Receiver<Envelope<T>>,
     node: Node<T>,
@@ -43,7 +39,6 @@ impl<T, H> Service<T, H>
         let logger = node.logger.new(o!("component" => "service"));
         Ok(Service {
             pid: pid,
-            request_count: 0,
             tx: tx,
             rx: rx,
             node: node,

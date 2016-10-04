@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 use std::fmt::{Display, Formatter, Error};
-use rustc_serialize::{Encodable, Decodable};
 use orset::{ORSet, Delta};
 use node_id::NodeId;
 

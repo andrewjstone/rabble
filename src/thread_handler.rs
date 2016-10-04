@@ -23,7 +23,7 @@ impl<T> ServiceHandler<T> for ThreadHandler<T>
     where T: Encodable + Decodable + Debug + Clone
 {
     fn handle_envelope(&mut self,
-                       node: &Node<T>,
+                       _node: &Node<T>,
                        envelope: Envelope<T>,
                        _: &Registrar) -> Result<()>
     {

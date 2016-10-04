@@ -1,10 +1,6 @@
-use std::io::{self, Read, Write};
 use std::fmt::Debug;
-use std::os::unix::io::AsRawFd;
 use rustc_serialize::{Encodable, Decodable};
-use node::Node;
 use envelope::Envelope;
-use errors::*;
 use correlation_id::CorrelationId;
 use pid::Pid;
 

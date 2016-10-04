@@ -3,7 +3,6 @@ use rustc_serialize::{Encodable, Decodable};
 use amy::Notification;
 use node_id::NodeId;
 use envelope::Envelope;
-use pid::Pid;
 use correlation_id::CorrelationId;
 
 /// Messages sent to the Cluster Server

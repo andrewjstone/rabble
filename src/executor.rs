@@ -113,7 +113,7 @@ impl<T: Encodable + Decodable + Send + Debug + Clone> Executor<T> {
     /// Return Ok(()) if the process exists, Err(envelope) otherwise.
     fn route_to_process(&mut self, envelope: Envelope<T>) -> Result<(), Envelope<T>> {
         if let Some(process) = self.processes.get_mut(&envelope.to) {
-            let Envelope {to, from, msg, correlation_id} = envelope;
+            let Envelope {from, msg, correlation_id, ..} = envelope;
             for envelope in process.handle(msg, from, correlation_id).drain(..) {
                 if envelope.to.node == self.node {
                     // This won't ever fail because we hold a ref to both ends of the channel

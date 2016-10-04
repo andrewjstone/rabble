@@ -192,7 +192,6 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
     }
 
     fn do_socket_io(&mut self, notification: Notification) -> Result<()> {
-        let id = notification.id;
         match notification.event {
             Event::Read => self.read(notification.id),
             Event::Write => self.write(notification.id, None),
@@ -486,7 +485,9 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
 
 
         for node in to_connect {
-            self.connect(node);
+            if let Err(e) = self.connect(node) {
+                warn!(self.logger, e.to_string());
+            }
         }
 
         self.disconnect_established(to_disconnect);
@@ -498,7 +499,8 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
             self.timer_wheel.remove(&id, conn.timer_wheel_index);
             if let Err(e) = self.registrar.deregister(conn.sock) {
                 error!(self.logger, "Failed to deregister socket";
-                       "id" => id, "peer" => format!("{:?}", conn.node));
+                       "id" => id, "peer" => format!("{:?}", conn.node),
+                       "error" => e.to_string());
             }
         }
     }
@@ -510,7 +512,8 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
                 self.timer_wheel.remove(&id, conn.timer_wheel_index);
                 if let Err(e) = self.registrar.deregister(conn.sock) {
                     error!(self.logger, "Failed to deregister socket";
-                           "id" => id, "peer" => conn.node.unwrap().to_string());
+                           "id" => id, "peer" => conn.node.unwrap().to_string(),
+                           "error" => e.to_string());
                 }
             }
         }
@@ -521,9 +524,3 @@ fn write_error(e: std::io::Error, id: usize, node: &Option<NodeId>) -> Error {
     let r: std::io::Result<()> = Err(e);
     r.chain_err(|| ErrorKind::WriteError(id, node.clone())).unwrap_err()
 }
-
-fn registrar_error(e: std::io::Error, id: usize, node: &Option<NodeId>) -> Error {
-    let r: std::io::Result<()> = Err(e);
-    r.chain_err(|| ErrorKind::RegistrarError(Some(id), node.clone())).unwrap_err()
-}
-

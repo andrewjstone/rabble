@@ -1,5 +1,4 @@
 use std::fmt::Debug;
-use std::marker::Send;
 use rustc_serialize::{Encodable, Decodable};
 use amy::{Notification, Registrar};
 use envelope::Envelope;
