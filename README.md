@@ -5,6 +5,8 @@ Status](https://travis-ci.org/andrewjstone/rabble.svg?branch=master)](https://tr
 
 ### Usage
 
+Rabble only works with Rust versions > 1.12 and must use nightly builds for the compiler plugins.
+
 Add the following to your `Cargo.toml`
 
 ```toml
