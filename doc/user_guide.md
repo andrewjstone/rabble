@@ -1,11 +1,11 @@
 # Introduction
 Rabble is useful for building distributed, clustered applications where actors can run on different
-[Nodes](https://github.com/andrewjstone/rabble/blob/cluster-server-rebase/src/node.rs) and
+[Nodes](https://github.com/andrewjstone/rabble/blob/e1474eda584f3c278322ce21d33d56e6e30f639f/src/node.rs) and
 communicate over the network. This allows for easier implementation of distributed algorithms based
 around asynchronous message passing between processes. Actors in rabble are primarily lightweight
-[processes](https://github.com/andrewjstone/rabble/blob/cluster-server-rebase/src/process.rs) that
+[processes](https://github.com/andrewjstone/rabble/blob/e1474eda584f3c278322ce21d33d56e6e30f639f/src/process.rs) that
 receive and send messages. Thread based
-[services](https://github.com/andrewjstone/rabble/blob/cluster-server-rebase/src/service.rs) provide
+[services](https://github.com/andrewjstone/rabble/blob/e1474eda584f3c278322ce21d33d56e6e30f639f/src/service.rs) provide
 a way to run computation heavy tasks, interact with the file system, or implement an API server
 while retaining the capability to send to and receive messages from other processes and services.
 
@@ -40,12 +40,12 @@ only an example to explain how to use Rabble.
 
 # Creating your nodes
 Each node needs a unique
-[NodeId](https://github.com/andrewjstone/rabble/blob/cluster-server-rebase/src/node_id.rs). A node
+[NodeId](https://github.com/andrewjstone/rabble/blob/e1474eda584f3c278322ce21d33d56e6e30f639f/src/node_id.rs). A node
 also needs a msg type for messages sent between actors. All actors can only send and receive a
 single message type. You can read more about why
-[here](https://github.com/andrewjstone/rabble/blob/cluster-server-rebase/doc/architecture.md#messages).
+[here](https://github.com/andrewjstone/rabble/blob/e1474eda584f3c278322ce21d33d56e6e30f639f/doc/architecture.md#messages).
 A node can then be started with a call to
-[rabble::rouse](https://github.com/andrewjstone/rabble/blob/cluster-server-rebase/src/lib.rs#L80).
+[rabble::rouse](https://github.com/andrewjstone/rabble/blob/e1474eda584f3c278322ce21d33d56e6e30f639f/src/lib.rs#L80).
 
 ```Rust
 use rabble::NodeId;
@@ -104,11 +104,11 @@ let's just leave it blank.
 
 Now we need to define our replica type and implement the counter process. Note that the messages
 received by a process are of type
-[Msg](https://github.com/andrewjstone/rabble/blob/cluster-server-rebase/src/msg.rs) which is
+[Msg](https://github.com/andrewjstone/rabble/blob/e1474eda584f3c278322ce21d33d56e6e30f639f/src/msg.rs) which is
 paramterized by the `CounterMsg`. This allows receipt of system data as well as user defined types.
 For now though, we will just concern ourself with the `User(T)` variant of the `Msg` enum.
 Additionally, each message has a corresponding
-[CorrelationId](https://github.com/andrewjstone/rabble/blob/b8ae3d7915542c5969196b3a799bf83ef53f011e/src/correlation_id.rs)
+[CorrelationId](https://github.com/andrewjstone/rabble/blob/e1474eda584f3c278322ce21d33d56e6e30f639f/src/correlation_id.rs)
 used to match requests with responses. Any received messages should put the correlation id in the
 outgoing envelopes.
 
@@ -221,7 +221,7 @@ for pid in pids {
 We need to join the nodes together into a cluster. Note that this is an operation that should most
 likely be exposed to the end user via an Admin server. For now though, we are just going to use the
 Rabble [Node
-API](https://github.com/andrewjstone/rabble/blob/b8ae3d7915542c5969196b3a799bf83ef53f011e/src/node.rs#L52-L65)
+API](https://github.com/andrewjstone/rabble/blob/e1474eda584f3c278322ce21d33d56e6e30f639f/src/node.rs#L52-L65)
 to do the join.
 
 In order to know when the nodes have been joined, we need to have some way of checking the cluster
@@ -275,16 +275,16 @@ Now we have 3 nodes up, with a counter process on each one. We hacked our way th
 setup, but now we want to learn how to build a service so that we can present both admin and API
 servers to network clients. Since we've already joined the nodes, we'll focus on building an API
 server here. All services must implement the [ServiceHandler
-trait](https://github.com/andrewjstone/rabble/blob/b8ae3d7915542c5969196b3a799bf83ef53f011e/src/service_handler.rs).
+trait](https://github.com/andrewjstone/rabble/blob/e1474eda584f3c278322ce21d33d56e6e30f639f/src/service_handler.rs).
 
 Our API service will use 4 byte framed MsgPack encoded messages over TCP and will use the
 already built
-[TcpServerHandler](https://github.com/andrewjstone/rabble/blob/b8ae3d7915542c5969196b3a799bf83ef53f011e/src/tcp_server_handler.rs).
+[TcpServerHandler](https://github.com/andrewjstone/rabble/blob/e1474eda584f3c278322ce21d33d56e6e30f639f/src/tcp_server_handler.rs).
 This service isolates connections from each other and routes messages to the correct connection.
 Connection handlers themselves are user specified and can be customized for the specific
 application. Therefore instead of writing a service handler directly we will instead need to
 implement a
-[ConnectionHandler](https://github.com/andrewjstone/rabble/blob/b8ae3d7915542c5969196b3a799bf83ef53f011e/src/connection_handler.rs).
+[ConnectionHandler](https://github.com/andrewjstone/rabble/blob/e1474eda584f3c278322ce21d33d56e6e30f639f/src/connection_handler.rs).
 
 Each connection handler has 2 message types that must be defined. One is for the actors in the
 system, which is the `CounterMsg` we've been using in the rest of the example. The other is the
@@ -404,7 +404,7 @@ is based on the hierarchical timer wheel implementation in
 
 Additionally, processes may want to return messages or set timers on startup. For this reason, there
 is an optional
-[init()](https://github.com/andrewjstone/rabble/blob/cluster-server-rebase/src/process.rs#L12-L14)
+[init()](https://github.com/andrewjstone/rabble/blob/e1474eda584f3c278322ce21d33d56e6e30f639f/src/process.rs#L12-L14)
 callback that can be implemented for processes. The example below will show the impelmentation of a
 simple test process that starts a 100ms timer in `init()` by responding with a message destined for
 the executor, and then gets a callback `Msg::Timeout` in `handle`.
