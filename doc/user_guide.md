@@ -65,7 +65,7 @@ let node_ids = create_node_ids(3);
 /// Each call to rabble::rouse spawns a few threads and returns their `JoinHandle`s along with the node.
 /// The handles should be joined at some point later in the code. None as the second parameter to
 /// rouse means just use the standard logger.
-let (node, handles) = node_ids.cloned().into_iter().fold((Vec::new(), Vec::new()), |(mut nodes, mut handles), node_id| {
+let (nodes, handles) = node_ids.cloned().into_iter().fold((Vec::new(), Vec::new()), |(mut nodes, mut handles), node_id| {
     let (node, handle_list) = rabble::rouse::<CounterMsg>(node_id, None);
     nodes.push(node);
     handles.extend(handle_list);
