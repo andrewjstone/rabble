@@ -68,7 +68,7 @@ pub trait Process : Send {
 Processes contain an internal state that can be mutated when a message is handled. Processes can
 only responed to messages, and do not generate output without input. Any output messages to actors
 in response to the input message are not sent directly over channels but are instead packaged into
-[envelopes](https://github.com/andrewjstone/rabble/blob/e1474eda584f3c278322ce21d33d56e6e30f639f/src/envelope.rs] and
+[envelopes](https://github.com/andrewjstone/rabble/blob/e1474eda584f3c278322ce21d33d56e6e30f639f/src/envelope.rs) and
 pushed onto an output Vec. A mutable reference to this output Vec is returned to the caller.
 
 The choice to return a mutable Vec of envelopes is an interesting one, so a short discussion of why
