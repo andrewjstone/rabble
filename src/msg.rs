@@ -1,10 +1,16 @@
-use rabble_msg::RabbleMsg;
+use std::fmt::Debug;
+use rustc_serialize::{Encodable, Decodable};
+use cluster_status::ClusterStatus;
+use executor_status::ExecutorStatus;
+use correlation_id::CorrelationId;
 
-/// The top-level type of messages sent over channels in Rabble.
-///
-/// This message must contain both rabble internal data types and user defined data types. Therefore
-/// an enum is used for this purpose.
-pub enum Msg<T> {
-    Rabble(RabbleMsg),
-    User(T)
+#[derive(Debug, Clone, Eq, PartialEq, RustcEncodable, RustcDecodable)]
+pub enum Msg<T: Encodable + Decodable + Debug + Clone> {
+    User(T),
+    ClusterStatus(ClusterStatus),
+    ExecutorStatus(ExecutorStatus),
+    StartTimer(usize), // time in ms
+    CancelTimer(Option<CorrelationId>),
+    Timeout,
+    Shutdown
 }
