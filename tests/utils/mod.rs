@@ -94,7 +94,7 @@ pub fn start_nodes(n: usize) -> (Vec<Node<RabbleUserMsg>>, Vec<JoinHandle<()>>) 
     let term = slog_term::streamer().build();
     let drain = slog_envlogger::LogBuilder::new(term)
         .filter(None, slog::FilterLevel::Debug).build();
-    let root_logger = slog::Logger::root(drain.fuse(), vec![]);
+    let root_logger = slog::Logger::root(drain.fuse(), None);
     slog_stdlog::set_logger(root_logger.clone()).unwrap();
     create_node_ids(n).into_iter().fold((Vec::new(), Vec::new()),
                                   |(mut nodes, mut handles), node_id| {

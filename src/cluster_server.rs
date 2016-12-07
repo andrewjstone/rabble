@@ -2,7 +2,6 @@ use std::sync::mpsc::{self, Sender, Receiver};
 use std::collections::{HashMap, HashSet};
 use std::net::{TcpListener, TcpStream};
 use std::fmt::Debug;
-use std;
 use libc::EINPROGRESS;
 use net2::{TcpBuilder, TcpStreamExt};
 use rustc_serialize::{Encodable, Decodable};
@@ -29,7 +28,7 @@ const TICK_TIME: usize = 1000; // milliseconds
 const REQUEST_TIMEOUT: usize = 5000; // milliseconds
 
 // This tick allows process specific timers to fire
-const EXECUTOR_TICK_TIME: usize = 10; // milliseconds
+const EXECUTOR_TICK_TIME: usize = 100; // milliseconds
 
 struct Conn {
     sock: TcpStream,
@@ -119,8 +118,10 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
                 }
                 match *e.kind() {
                     ErrorKind::EncodeError(..) | ErrorKind::DecodeError(..) |
-                    ErrorKind::RegistrarError(..) | ErrorKind::SendError(..) =>
-                        error!(self.logger, e.to_string()),
+                    ErrorKind::RegistrarError(..) | ErrorKind::SendError(..) => {
+                        error!(self.logger, e.to_string());
+                        break;
+                    }
 
                     ErrorKind::Shutdown(..) => {
                         info!(self.logger, e.to_string());
@@ -180,6 +181,7 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
     }
 
     fn handle_poll_notifications(&mut self, notifications: Vec<Notification>) -> Result<()> {
+        trace!(self.logger, "handle_poll_notification"; "num_notifications" => notifications.len());
         let mut errors = Vec::new();
         for n in notifications {
             let result = match n.id {
@@ -221,6 +223,7 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
     }
 
     fn read(&mut self, id: usize) -> Result<()> {
+        trace!(self.logger, "read"; "id" => id);
         match self.members_sent(id) {
             Some(false) => try!(self.send_members(id)),
             None => (),
@@ -268,13 +271,22 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
     }
 
     fn write(&mut self, id: usize, msg: Option<Vec<u8>>) -> Result<()> {
-        if let Some(conn) = self.connections.get_mut(&id) {
+        trace!(self.logger, "write"; "id" => id);
+        let registrar = &self.registrar;
+        if let Some(mut conn) = self.connections.get_mut(&id) {
             if msg.is_none() {
+                if conn.writer.is_writable() {
+                    // The socket has just became writable. We need to re-register it as only
+                    // readable, or it the event will keep firing indefinitely even if there is
+                    // no data to write.
+                    try!(registrar.reregister(id, &conn.sock, Event::Read)
+                         .chain_err(|| ErrorKind::RegistrarError(Some(id), conn.node.clone())));
+                }
+
                 // We just got an Event::Write from the poller
                 conn.writer.writable();
             }
-            try!(conn.writer.write(&mut conn.sock, msg)
-                 .chain_err(|| ErrorKind::WriteError(id, conn.node.clone())));
+            try!(conn_write(id, &mut conn, msg, &registrar));
         }
         Ok(())
     }
@@ -300,6 +312,7 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
                 return;
             }
         }
+        debug!(self.logger, "Trying to establish connection"; "peer" => from.to_string(), "id" => id);
         if let Some(conn) = self.connections.get_mut(&id) {
             info!(self.logger, "Establish connection"; "peer" => from.to_string(), "id" => id);
             conn.node = Some(from.clone());
@@ -313,12 +326,13 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
     /// comes from a node that sorts less than the node of the server side of the connection.
     /// Return the id to remove if there is an existing connection to remove, otherwise return
     /// `None` indicating that there isn't an existing connection, so don't close the new one.
-    fn choose_connection_to_close(&self, id: usize, other_node: &NodeId) -> Option<usize> {
-        if let Some(other_id) = self.established.get(other_node) {
-            if let Some(other_conn) = self.connections.get(&other_id) {
-                if (other_conn.is_client && self.node < *other_node) ||
-                    (!other_conn.is_client && self.node > *other_node) {
-                        return Some(*other_id);
+    fn choose_connection_to_close(&self, id: usize, from: &NodeId) -> Option<usize> {
+        if let Some(saved_id) = self.established.get(from) {
+            if let Some(saved_conn) = self.connections.get(&saved_id) {
+                // A client connection always comes from self.node
+                if (saved_conn.is_client && self.node < *from) ||
+                    (!saved_conn.is_client && *from < self.node) {
+                        return Some(*saved_id);
                 } else {
                     return Some(id);
                 }
@@ -358,6 +372,7 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
     }
 
     fn connect(&mut self, node: NodeId) -> Result<()> {
+        debug!(self.logger, "connect"; "to" => node.to_string());
         let sock = try!(TcpBuilder::new_v4().chain_err(|| "Failed to create a IPv4 socket"));
         let sock = try!(sock.to_tcp_stream().chain_err(|| "Failed to create TcpStream"));
         try!(sock.set_nonblocking(true).chain_err(|| "Failed to make socket nonblocking"));
@@ -372,6 +387,7 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
 
     fn accept_connection(&mut self) -> Result<()> {
         while let Ok((sock, _)) = self.listener.accept() {
+            debug!(self.logger, "accepted connection");
             try!(sock.set_nonblocking(true).chain_err(|| "Failed to make socket nonblocking"));
             let id = try!(self.init_connection(sock, None));
             try!(self.send_members(id));
@@ -380,7 +396,7 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
     }
 
     fn init_connection(&mut self, sock: TcpStream, node: Option<NodeId>) -> Result<usize> {
-        let id = try!(self.registrar.register(&sock, Event::Both)
+        let id = try!(self.registrar.register(&sock, Event::Read)
                       .chain_err(|| ErrorKind::RegistrarError(None, None)));
         debug!(self.logger, "init_connection()";
                "id" => id, "is_client" => node.is_some(), "peer" => format!("{:?}", node));
@@ -393,16 +409,17 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
 
     fn send_members(&mut self, id: usize) -> Result<()> {
         let encoded = try!(self.encode_members(id));
-        if let Some(conn) = self.connections.get_mut(&id) {
+        let registrar = &self.registrar;
+        if let Some(mut conn) = self.connections.get_mut(&id) {
             info!(self.logger, "Send members"; "id" => id);
-            try!(conn.writer.write(&mut conn.sock, Some(encoded))
-                 .chain_err(|| ErrorKind::WriteError(id, None)));
+            try!(conn_write(id, &mut conn, Some(encoded), &registrar));
             conn.members_sent = true;
         }
         Ok(())
     }
 
     fn tick(&mut self) -> Result<()> {
+        trace!(self.logger, "tick");
         self.timer.arm();
         let expired = self.timer_wheel.expire();
         self.deregister(expired);
@@ -412,10 +429,10 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
     }
 
     fn tick_executor(&mut self) -> Result<()> {
+        trace!(self.logger, "tick_executor");
         self.executor_timer.arm();
-        if let Err(mpsc::SendError(ExecutorMsg::Tick)) = self.executor_tx.send(ExecutorMsg::Tick) {
-            return Err(ErrorKind::SendError("ExecutorMsg::Tick".to_string(), None).into());
-        }
+        // Panic if the executor is down.
+        self.executor_tx.send(ExecutorMsg::Tick).unwrap() ;
         Ok(())
     }
 
@@ -476,13 +493,14 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
     // Write encoded values to all connections and return the id of any connections with errors
     fn broadcast(&mut self, encoded: Vec<u8>) -> Result<()> {
         let mut errors = Vec::new();
-        for (id, conn) in self.connections.iter_mut() {
+        let registrar = &self.registrar;
+        for (id, mut conn) in self.connections.iter_mut() {
             if !conn.members_sent {
                 // This connection isn't connected yet
                 continue;
             }
-            if let Err(e) = conn.writer.write(&mut conn.sock, Some(encoded.clone())) {
-                errors.push(write_error(e, *id, &conn.node))
+            if let Err(e) = conn_write(*id, &mut conn, Some(encoded.clone()), &registrar) {
+                errors.push(e)
             }
         }
         if errors.len() != 0 {
@@ -509,7 +527,7 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
 
         let to_disconnect: Vec<NodeId> = known_peer_conns.difference(&all).cloned().collect();
 
-        debug!(self.logger, "check_connections";
+        trace!(self.logger, "check_connections";
                "to_connect" => format!("{:?}", to_connect),
                "to_disconnect" => format!("{:?}", to_disconnect));
 
@@ -548,8 +566,18 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
         }
     }
 }
+fn conn_write(id: usize,
+              conn: &mut Conn,
+              msg: Option<Vec<u8>>,
+              registrar: &Registrar) -> Result<()>
+{
+        let writable = try!(conn.writer.write(&mut conn.sock, msg).chain_err(|| {
+            ErrorKind::WriteError(id, conn.node.clone())
+        }));
+        if !writable {
+            return registrar.reregister(id, &conn.sock, Event::Both)
+                .chain_err(|| ErrorKind::RegistrarError(Some(id), conn.node.clone()));
+        }
+        Ok(())
+    }
 
-fn write_error(e: std::io::Error, id: usize, node: &Option<NodeId>) -> Error {
-    let r: std::io::Result<()> = Err(e);
-    r.chain_err(|| ErrorKind::WriteError(id, node.clone())).unwrap_err()
-}

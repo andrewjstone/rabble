@@ -123,7 +123,7 @@ impl <C,S> TcpServerHandler<C, S>
         try!(sock.set_nonblocking(true).chain_err(|| "Failed to make socket nonblocking"));
         let id = try!(registrar.register(&sock, Event::Read)
                       .chain_err(|| "Failed to register new socket for reading"));
-        let handler = C::new(self.pid.clone(), id);
+        let handler = C::new(self.pid.clone(), id as u64);
         let slot = self.connection_timer_wheel.as_mut().map_or(0, |mut tw| tw.insert(id));
         let connection = Connection::new(id, handler, sock, slot);
         self.connections.insert(id, connection);
@@ -162,7 +162,7 @@ impl <C,S> TcpServerHandler<C, S>
     fn request_tick(&mut self, node: &Node<C::Msg>) -> Result<()>{
         for correlation_id in self.request_timer_wheel.expire() {
             let conn_id = correlation_id.connection.as_ref().unwrap();
-            if let Some(mut connection) = self.connections.get_mut(&conn_id) {
+            if let Some(mut connection) = self.connections.get_mut(&(*conn_id as usize)) {
                 let envelope = Envelope {
                     from: self.pid.clone(),
                     to: self.pid.clone(),
@@ -252,7 +252,7 @@ impl<C, S> ServiceHandler<C::Msg> for TcpServerHandler<C, S>
         // Don't bother cancelling request timers... Just ignore the timeouts in the connection if
         // the request has already received its reply
         let conn_id = envelope.correlation_id.as_ref().unwrap().connection.as_ref().cloned().unwrap();
-        if let Some(mut connection) = self.connections.get_mut(&conn_id) {
+        if let Some(mut connection) = self.connections.get_mut(&(conn_id as usize)) {
             let responses = connection.handler.handle_envelope(envelope);
             try!(handle_connection_msgs(&mut self.request_timer_wheel,
                                         responses,
@@ -312,7 +312,7 @@ fn handle_connection_msgs<C, S>(request_timer_wheel: &mut TimerWheel<Correlation
                 if envelope.correlation_id.is_some() {
                     request_timer_wheel.insert(envelope.correlation_id.as_ref().unwrap().clone());
                 }
-                let _ = node.send(envelope);
+                node.send(envelope).unwrap();
             },
             ConnectionMsg::Client(client_msg, _) => {
                 // Respond to the client

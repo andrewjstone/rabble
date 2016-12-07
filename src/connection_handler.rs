@@ -9,7 +9,7 @@ pub trait ConnectionHandler : Sized {
     type Msg: Encodable + Decodable + Debug + Clone;
     type ClientMsg: Encodable + Decodable + Debug;
 
-    fn new(pid: Pid, id: usize) -> Self;
+    fn new(pid: Pid, id: u64) -> Self;
     fn handle_envelope(&mut self, Envelope<Self::Msg>) -> &mut Vec<ConnectionMsg<Self>>;
     fn handle_network_msg(&mut self, Self::ClientMsg) -> &mut Vec<ConnectionMsg<Self>>;
 }

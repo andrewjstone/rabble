@@ -119,7 +119,7 @@ impl<T: Encodable + Decodable + Send + Debug + Clone> Executor<T> {
     /// be addressed to local processes.
     fn route(&mut self, envelope: Envelope<T>) {
         if self.node != envelope.to.node {
-            let _ = self.cluster_tx.send(ClusterMsg::Envelope(envelope));
+            self.cluster_tx.send(ClusterMsg::Envelope(envelope)).unwrap();
             return;
         }
         if let Err(envelope) = self.route_to_process(envelope) {
@@ -142,7 +142,7 @@ impl<T: Encodable + Decodable + Send + Debug + Clone> Executor<T> {
                     // This won't ever fail because we hold a ref to both ends of the channel
                     self.tx.send(ExecutorMsg::Envelope(envelope)).unwrap();
                 } else {
-                    let _ = self.cluster_tx.send(ClusterMsg::Envelope(envelope));
+                    self.cluster_tx.send(ClusterMsg::Envelope(envelope)).unwrap();
                 }
             }
             return Ok(());
@@ -153,7 +153,7 @@ impl<T: Encodable + Decodable + Send + Debug + Clone> Executor<T> {
     /// Route an envelope to a service on this node
     fn route_to_service(&self, envelope: Envelope<T>) {
         if let Some(tx) = self.service_senders.get(&envelope.to) {
-            let _ = tx.send(envelope);
+            tx.send(envelope).unwrap();
         } else {
             warn!(self.logger, "Failed to find service"; "pid" => envelope.to.to_string());
         }

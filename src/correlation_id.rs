@@ -7,8 +7,8 @@ use pid::Pid;
 #[derive(Debug, Hash, Clone, Eq, PartialEq, RustcEncodable, RustcDecodable)]
 pub struct CorrelationId {
     pub pid: Pid,
-    pub connection: Option<usize>,
-    pub request: Option<usize>
+    pub connection: Option<u64>,
+    pub request: Option<u64>
 }
 
 impl CorrelationId {
@@ -22,7 +22,7 @@ impl CorrelationId {
     }
 
     /// Create a correlation id that matches a handler and connection
-    pub fn connection(pid: Pid, connection_id: usize) -> CorrelationId {
+    pub fn connection(pid: Pid, connection_id: u64) -> CorrelationId {
         CorrelationId {
             pid: pid,
             connection: Some(connection_id),
@@ -31,7 +31,7 @@ impl CorrelationId {
     }
 
     /// Create a correlation id that matches a handler, connection, and request
-    pub fn request(pid: Pid, connection_id: usize, request_id: usize) -> CorrelationId {
+    pub fn request(pid: Pid, connection_id: u64, request_id: u64) -> CorrelationId {
         CorrelationId {
             pid: pid,
             connection: Some(connection_id),

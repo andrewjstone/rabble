@@ -16,7 +16,6 @@ extern crate ferris;
 extern crate slog;
 extern crate slog_stdlog;
 
-mod errors;
 mod node_id;
 mod node;
 mod members;
@@ -41,6 +40,9 @@ mod connection_handler;
 mod serialize;
 mod msgpack_serializer;
 
+pub mod errors;
+
+pub use errors::Result;
 pub use node_id::NodeId;
 pub use node::Node;
 pub use pid::Pid;
@@ -60,6 +62,7 @@ pub use connection_handler::{
 pub use serialize::Serialize;
 pub use msgpack_serializer::MsgpackSerializer;
 pub use tcp_server_handler::TcpServerHandler;
+pub use service_handler::ServiceHandler;
 
 use std::thread::{self, JoinHandle};
 use std::sync::mpsc::channel;

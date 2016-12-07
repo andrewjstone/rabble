@@ -44,8 +44,8 @@ pub fn start(node: Node<RabbleUserMsg>)
 
 pub struct ApiServerConnectionHandler {
     pid: Pid,
-    id: usize,
-    total_requests: usize,
+    id: u64,
+    total_requests: u64,
     output: Vec<ConnectionMsg<ApiServerConnectionHandler>>
 }
 
@@ -53,7 +53,7 @@ impl ConnectionHandler for ApiServerConnectionHandler {
     type Msg = RabbleUserMsg;
     type ClientMsg = ApiClientMsg;
 
-    fn new(pid: Pid, id: usize) -> ApiServerConnectionHandler {
+    fn new(pid: Pid, id: u64) -> ApiServerConnectionHandler {
         ApiServerConnectionHandler {
             pid: pid,
             id: id,
