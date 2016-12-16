@@ -79,6 +79,14 @@ impl<T: Encodable + Decodable + Debug + Clone> Node<T> {
               format!("ExecutorMsg::Start({}, ..)", pid))
     }
 
+    /// Remove a process from the executor
+    pub fn stop(&self, pid: &Pid) -> Result<()> {
+        send!(self.executor_tx,
+              ExecutorMsg::Stop(pid.clone()),
+              Some(pid),
+              format!("ExecutorMsg::Start({}, ..)", pid))
+    }
+
     /// Register a Service's sender with the executor so that it can be sent messages addressed to
     /// its pid
     pub fn register_service(&self, pid: &Pid, tx: &amy::Sender<Envelope<T>>) -> Result<()>
@@ -118,7 +126,7 @@ impl<T: Encodable + Decodable + Debug + Clone> Node<T> {
 
     /// Shutdown the node
     pub fn shutdown(&self) {
-        let _ = self.executor_tx.send(ExecutorMsg::Shutdown);
-        let _ = self.cluster_tx.send(ClusterMsg::Shutdown);
+        self.executor_tx.send(ExecutorMsg::Shutdown).unwrap();
+        self.cluster_tx.send(ClusterMsg::Shutdown).unwrap();
     }
 }
