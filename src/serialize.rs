@@ -1,6 +1,5 @@
 use std::io::{Read, Write};
 use std::fmt::Debug;
-use rustc_serialize::{Encodable, Decodable};
 use errors::*;
 
 /// This trait provides for reading framed messages from a `Read` type, decoding them and
@@ -16,7 +15,7 @@ use errors::*;
 /// to minimize memory consumption we just write as much as possible and worry about starvation
 /// management on the reader side.
 pub trait Serialize {
-    type Msg: Encodable + Decodable + Clone + Debug;
+    type Msg: Clone + Debug;
 
     fn new() -> Self;
 
