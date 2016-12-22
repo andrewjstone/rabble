@@ -6,6 +6,7 @@ extern crate error_chain;
 extern crate orset;
 extern crate rustc_serialize;
 extern crate rmp_serialize as msgpack;
+extern crate protobuf;
 extern crate amy;
 extern crate time;
 extern crate net2;
@@ -39,6 +40,7 @@ mod tcp_server_handler;
 mod connection_handler;
 mod serialize;
 mod msgpack_serializer;
+mod protobuf_serializer;
 
 pub mod errors;
 
@@ -61,6 +63,7 @@ pub use connection_handler::{
 };
 pub use serialize::Serialize;
 pub use msgpack_serializer::MsgpackSerializer;
+pub use protobuf_serializer::ProtobufSerializer;
 pub use tcp_server_handler::TcpServerHandler;
 pub use service_handler::ServiceHandler;
 

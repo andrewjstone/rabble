@@ -7,7 +7,7 @@ use pid::Pid;
 /// Implement this for a specific connection handler
 pub trait ConnectionHandler : Sized {
     type Msg: Encodable + Decodable + Debug + Clone;
-    type ClientMsg: Encodable + Decodable + Debug;
+    type ClientMsg: Debug;
 
     fn new(pid: Pid, id: u64) -> Self;
     fn handle_envelope(&mut self, Envelope<Self::Msg>) -> &mut Vec<ConnectionMsg<Self>>;

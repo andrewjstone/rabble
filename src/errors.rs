@@ -1,5 +1,6 @@
 use std::io;
 use msgpack;
+use protobuf;
 use pid::Pid;
 use node_id::NodeId;
 
@@ -9,6 +10,7 @@ error_chain! {
         io::Error, Io;
         msgpack::encode::Error, MsgpackEncode;
         msgpack::decode::Error, MsgpackDecode;
+        protobuf::error::ProtobufError, Protobuf;
     }
 
     errors {
