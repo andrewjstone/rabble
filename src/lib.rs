@@ -12,6 +12,7 @@ extern crate time;
 extern crate net2;
 extern crate libc;
 extern crate ferris;
+extern crate hdrsample;
 
 #[macro_use]
 extern crate slog;
@@ -30,8 +31,6 @@ mod cluster_msg;
 mod external_msg;
 mod cluster_server;
 mod timer_wheel;
-mod executor_status;
-mod cluster_status;
 mod service;
 mod service_handler;
 mod correlation_id;
@@ -41,9 +40,13 @@ mod connection_handler;
 mod serialize;
 mod msgpack_serializer;
 mod protobuf_serializer;
+mod status;
+mod histogram;
 
 pub mod errors;
 
+pub use histogram::Histogram;
+pub use status::StatusVal;
 pub use errors::Result;
 pub use node_id::NodeId;
 pub use node::Node;
@@ -53,8 +56,6 @@ pub use envelope::Envelope;
 pub use service::Service;
 pub use correlation_id::CorrelationId;
 pub use msg::Msg;
-pub use cluster_status::ClusterStatus;
-pub use executor_status::ExecutorStatus;
 
 pub use thread_handler::ThreadHandler;
 pub use connection_handler::{

@@ -35,7 +35,6 @@ use rabble::{
     Pid,
     Envelope,
     Msg,
-    ClusterStatus,
     MsgpackSerializer,
     Serialize,
     Node,
@@ -192,11 +191,11 @@ fn wait_for_connected_cluster(nodes: &Vec<CrNode>,
             let notifications = poller.wait(5000).unwrap();
             assert_eq!(1, notifications.len());
             let envelope = test_rx.try_recv().unwrap();
-            if let Msg::ClusterStatus(ClusterStatus{established,
-                                                    num_connections, ..}) = envelope.msg
-            {
+            if let Msg::ClusterStatus(mut table) = envelope.msg {
                 // Ensure that we are in a stable state. We have 2 established connections and no
                 // non-established connections that may cause established ones to disconnect.
+                let num_connections = table.remove("current_connections").unwrap().get_int();
+                let established = table.remove("established").unwrap().get_stringset();
                 if established.len() == 2  && num_connections == 2 {
                     println!("Cluster connected in {} ms at {}",
                              (SteadyTime::now() - start).num_milliseconds(), node.id);

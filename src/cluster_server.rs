@@ -18,9 +18,12 @@ use timer_wheel::TimerWheel;
 use envelope::Envelope;
 use orset::{ORSet, Delta};
 use pid::Pid;
-use cluster_status::ClusterStatus;
 use correlation_id::CorrelationId;
 use errors::*;
+use status::StatusVal;
+use time::{now, Tm};
+use hdrsample;
+use histogram::Histogram;
 
 // TODO: This is totally arbitrary right now and should probably be user configurable
 const MAX_FRAME_SIZE: u32 = 100*1024*1024; // 100 MB
@@ -37,7 +40,12 @@ struct Conn {
     members_sent: bool,
     timer_wheel_index: usize,
     reader: FrameReader,
-    writer: FrameWriter
+    writer: FrameWriter,
+
+    // Status related fields
+    created: Tm,
+    sent_msgs: u64,
+    received_msgs: u64
 }
 
 impl Conn {
@@ -50,6 +58,11 @@ impl Conn {
             timer_wheel_index: 0, // Initialize with a fake value
             reader: FrameReader::new(MAX_FRAME_SIZE),
             writer: FrameWriter::new(),
+
+            // Status related fields
+            created: now(),
+            sent_msgs:0,
+            received_msgs: 0
         }
     }
 }
@@ -70,7 +83,14 @@ pub struct ClusterServer<T: Encodable + Decodable + Debug + Clone> {
     connections: HashMap<usize, Conn>,
     established: HashMap<NodeId, usize>,
     registrar: Registrar,
-    logger: slog::Logger
+    logger: slog::Logger,
+
+    // Status information
+    connection_durations: hdrsample::Histogram<u64>,
+    poll_notifications: u64,
+    errors: u64,
+    sent_network_msgs: u64,
+    received_network_msgs: u64
 }
 
 impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
@@ -102,8 +122,48 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
             connections: HashMap::new(),
             established: HashMap::new(),
             registrar: registrar,
-            logger: logger.new(o!("component" => "cluster_server"))
+            logger: logger.new(o!("component" => "cluster_server")),
+
+            // Status information
+            connection_durations: hdrsample::Histogram::<u64>::new(3).unwrap(),
+            poll_notifications: 0,
+            errors: 0,
+            sent_network_msgs: 0,
+            received_network_msgs: 0,
         }
+    }
+
+
+    /// All status information gets put in a hashmap so it can be
+    /// collected and combined with status from other components. It's
+    /// created on demand, because it's much faster to update struct
+    /// member variables directly than look them up in a map. The map
+    /// is only generated when a user wants to retrieve stats.
+    fn create_status_table(&self) -> HashMap<String, StatusVal> {
+        let mut table = HashMap::new();
+        table.insert("members".to_string(),
+                     StatusVal::StringSet(self.members.all().into_iter().map(|n| n.to_string()).collect()));
+        table.insert("established".to_string(),
+                     StatusVal::StringSet(self.established.keys().cloned().map(|n| n.to_string()).collect()));
+        table.insert("poll_notifications".to_string(), StatusVal::Int(self.poll_notifications));
+        table.insert("current_connections".to_string(), StatusVal::Int(self.connections.len() as u64));
+        table.insert("connection_durations".to_string(),
+                     StatusVal::Histogram(Histogram::from(self.connection_durations.clone())));
+        table.insert("errors".to_string(), StatusVal::Int(self.errors));
+        table.insert("sent_network_msgs".to_string(), StatusVal::Int(self.sent_network_msgs));
+        table.insert("received_network_msgs".to_string(), StatusVal::Int(self.received_network_msgs));
+        for (_, ref conn) in &self.connections {
+            if conn.node.is_some() {
+                let name = format!("conn_{}_created", conn.node.as_ref().unwrap());
+                let timespec = conn.created.to_timespec();
+                table.insert(name, StatusVal::Timestamp(timespec.sec, timespec.nsec));
+                let name = format!("conn_{}_sent_msgs", conn.node.as_ref().unwrap());
+                table.insert(name, StatusVal::Int(conn.sent_msgs));
+                let name = format!("conn_{}_received_msgs", conn.node.as_ref().unwrap());
+                table.insert(name, StatusVal::Int(conn.received_msgs));
+            }
+        }
+        table
     }
 
     pub fn run(mut self) {
@@ -113,6 +173,7 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
         self.listener_id = self.registrar.register(&self.listener, Event::Read).unwrap();
         while let Ok(msg) = self.rx.recv() {
             if let Err(e) = self.handle_cluster_msg(msg) {
+                self.errors += 1;
                 for id in e.kind().get_ids() {
                     self.close(id)
                 }
@@ -147,15 +208,10 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
     }
 
     fn get_status(&self, correlation_id: CorrelationId) -> Result<()> {
-        let status = ClusterStatus {
-            members: self.members.all(),
-            established: self.established.keys().cloned().collect(),
-            num_connections: self.connections.len()
-        };
         let envelope = Envelope {
             to: correlation_id.pid.clone(),
             from: self.pid.clone(),
-            msg: Msg::ClusterStatus(status),
+            msg: Msg::ClusterStatus(self.create_status_table()),
             correlation_id: Some(correlation_id)
         };
         // Route the response through the executor since it knows how to contact all Pids
@@ -177,10 +233,12 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
                 .chain_err(|| ErrorKind::EncodeError(Some(id), Some(node))));
             try!(self.write(id, Some(encoded)));
         }
+        self.sent_network_msgs += 1;
         Ok(())
     }
 
     fn handle_poll_notifications(&mut self, notifications: Vec<Notification>) -> Result<()> {
+        self.poll_notifications += 1;
         trace!(self.logger, "handle_poll_notification"; "num_notifications" => notifications.len());
         let mut errors = Vec::new();
         for n in notifications {
@@ -252,6 +310,7 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
                 debug!(self.logger, "Got User Message";
                        "from" => envelope.from.to_string(),
                        "to" => envelope.to.to_string());
+                self.received_network_msgs += 1;
                 if let Err(mpsc::SendError(ExecutorMsg::Envelope(envelope)))
                     = self.executor_tx.send(ExecutorMsg::Envelope(envelope))
                 {
@@ -353,6 +412,7 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
                 let msg = try!(Decodable::decode(&mut decoder)
                                .chain_err(|| ErrorKind::DecodeError(id, node.clone())));
                 output.push(msg);
+                conn.received_msgs += 1;
             }
         }
         Ok(output)
@@ -457,6 +517,8 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
         if let Some(conn) = self.connections.remove(&id) {
             let _ = self.registrar.deregister(conn.sock);
             self.timer_wheel.remove(&id, conn.timer_wheel_index);
+            let duration = (now() - conn.created).num_seconds() as u64;
+            let _ = self.connection_durations.record(duration);
             if let Some(node) = conn.node {
                 // Remove established connection if it matches this id
                 if let Some(established_id) = self.established.remove(&node) {
@@ -566,18 +628,22 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
         }
     }
 }
+
 fn conn_write(id: usize,
               conn: &mut Conn,
               msg: Option<Vec<u8>>,
               registrar: &Registrar) -> Result<()>
 {
-        let writable = try!(conn.writer.write(&mut conn.sock, msg).chain_err(|| {
-            ErrorKind::WriteError(id, conn.node.clone())
-        }));
-        if !writable {
-            return registrar.reregister(id, &conn.sock, Event::Both)
-                .chain_err(|| ErrorKind::RegistrarError(Some(id), conn.node.clone()));
-        }
-        Ok(())
+    if msg.is_some() {
+        conn.sent_msgs += 1;
     }
+    let writable = try!(conn.writer.write(&mut conn.sock, msg).chain_err(|| {
+        ErrorKind::WriteError(id, conn.node.clone())
+    }));
+    if !writable {
+        return registrar.reregister(id, &conn.sock, Event::Both)
+            .chain_err(|| ErrorKind::RegistrarError(Some(id), conn.node.clone()));
+    }
+    Ok(())
+}
 
