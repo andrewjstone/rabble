@@ -14,7 +14,7 @@ use msg::Msg;
 use executor_msg::ExecutorMsg;
 use cluster_msg::ClusterMsg;
 use correlation_id::CorrelationId;
-use status::StatusVal;
+use status::{StatusVal, TimeUnit};
 use hdrsample;
 use histogram::Histogram;
 
@@ -102,13 +102,21 @@ impl<T: Encodable + Decodable + Send + Debug + Clone> Executor<T> {
                              .cloned()
                              .map(|pid| pid.to_string()).collect()));
         table.insert("time_between_ticks".to_string(),
-                     StatusVal::Histogram(Histogram::from(self.time_between_ticks.clone())));
+                     StatusVal::Histogram(
+                         TimeUnit::Milliseconds,
+                         Histogram::from(self.time_between_ticks.clone())));
         table.insert("route_to_local_process".to_string(),
-                     StatusVal::Histogram(Histogram::from(self.route_to_local_process.clone())));
+                     StatusVal::Histogram(
+                         TimeUnit::Microseconds,
+                         Histogram::from(self.route_to_local_process.clone())));
         table.insert("route_to_remote_process".to_string(),
-                     StatusVal::Histogram(Histogram::from(self.route_to_remote_process.clone())));
+                     StatusVal::Histogram(
+                         TimeUnit::Nanoseconds,
+                         Histogram::from(self.route_to_remote_process.clone())));
         table.insert("route_to_service".to_string(),
-                     StatusVal::Histogram(Histogram::from(self.route_to_service.clone())));
+                     StatusVal::Histogram(
+                         TimeUnit::Nanoseconds,
+                         Histogram::from(self.route_to_service.clone())));
         
         table
     }

@@ -12,7 +12,6 @@ pub struct CorrelationId {
 }
 
 impl CorrelationId {
-
     pub fn pid(pid: Pid) -> CorrelationId {
         CorrelationId {
             pid: pid,

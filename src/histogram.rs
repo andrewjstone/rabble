@@ -3,7 +3,7 @@ use hdrsample;
 
 #[derive(Debug, Clone, Eq, PartialEq, RustcEncodable, RustcDecodable)]
 pub struct Histogram {
-    pub timestamp: (i64, i32), // Seconds, Nanoseconds (UTC)
+    pub timestamp: String, // UTC
     pub len: u64,
     pub low: u64,
     pub high: u64,
@@ -25,9 +25,9 @@ pub struct Bucket {
 
 impl From<hdrsample::Histogram<u64>> for Histogram {
     fn from(h: hdrsample::Histogram<u64>) -> Self {
-        let now = now_utc().to_timespec();
+        let now = now_utc().rfc3339().to_string();
         Histogram {
-            timestamp: (now.sec, now.nsec),
+            timestamp: now,
             len: h.len() as u64,
             low: h.low() as u64,
             high: h.high(),

@@ -20,8 +20,8 @@ use orset::{ORSet, Delta};
 use pid::Pid;
 use correlation_id::CorrelationId;
 use errors::*;
-use status::StatusVal;
-use time::{now, Tm};
+use status::{TimeUnit, StatusVal};
+use time::{now, now_utc, Tm};
 use hdrsample;
 use histogram::Histogram;
 
@@ -148,15 +148,16 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
         table.insert("poll_notifications".to_string(), StatusVal::Int(self.poll_notifications));
         table.insert("current_connections".to_string(), StatusVal::Int(self.connections.len() as u64));
         table.insert("connection_durations".to_string(),
-                     StatusVal::Histogram(Histogram::from(self.connection_durations.clone())));
+                     StatusVal::Histogram(
+                         TimeUnit::Seconds,
+                         Histogram::from(self.connection_durations.clone())));
         table.insert("errors".to_string(), StatusVal::Int(self.errors));
         table.insert("sent_network_msgs".to_string(), StatusVal::Int(self.sent_network_msgs));
         table.insert("received_network_msgs".to_string(), StatusVal::Int(self.received_network_msgs));
         for (_, ref conn) in &self.connections {
             if conn.node.is_some() {
                 let name = format!("conn_{}_created", conn.node.as_ref().unwrap());
-                let timespec = conn.created.to_timespec();
-                table.insert(name, StatusVal::Timestamp(timespec.sec, timespec.nsec));
+                table.insert(name, StatusVal::Timestamp(now_utc().rfc3339().to_string()));
                 let name = format!("conn_{}_sent_msgs", conn.node.as_ref().unwrap());
                 table.insert(name, StatusVal::Int(conn.sent_msgs));
                 let name = format!("conn_{}_received_msgs", conn.node.as_ref().unwrap());
@@ -646,4 +647,3 @@ fn conn_write(id: usize,
     }
     Ok(())
 }
-

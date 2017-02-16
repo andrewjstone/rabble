@@ -46,7 +46,7 @@ mod histogram;
 pub mod errors;
 
 pub use histogram::Histogram;
-pub use status::StatusVal;
+pub use status::{StatusVal, StatusTable};
 pub use errors::Result;
 pub use node_id::NodeId;
 pub use node::Node;
