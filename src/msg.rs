@@ -6,8 +6,7 @@ use status::StatusTable;
 #[derive(Debug, Clone, Eq, PartialEq, RustcEncodable, RustcDecodable)]
 pub enum Msg<T: Encodable + Decodable + Debug + Clone> {
     User(T),
-    ClusterStatus(StatusTable),
-    ExecutorStatus(StatusTable),
+    Status(StatusTable),
     StartTimer(usize), // time in ms
     CancelTimer(Option<CorrelationId>),
     Timeout,

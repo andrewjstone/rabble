@@ -191,7 +191,7 @@ fn wait_for_connected_cluster(nodes: &Vec<CrNode>,
             let notifications = poller.wait(5000).unwrap();
             assert_eq!(1, notifications.len());
             let envelope = test_rx.try_recv().unwrap();
-            if let Msg::ClusterStatus(mut table) = envelope.msg {
+            if let Msg::Status(mut table) = envelope.msg {
                 // Ensure that we are in a stable state. We have 2 established connections and no
                 // non-established connections that may cause established ones to disconnect.
                 let num_connections = table.remove("current_connections").unwrap().get_int();

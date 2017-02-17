@@ -99,7 +99,7 @@ fn wait_for_cluster_status(node: &Node<RabbleUserMsg>,
         let correlation_id = CorrelationId::pid(test_pid.clone());
         node.cluster_status(correlation_id.clone()).unwrap();
         if let Ok(envelope) = test_rx.try_recv() {
-            if let Msg::ClusterStatus(mut table) = envelope.msg {
+            if let Msg::Status(mut table) = envelope.msg {
                 let num_connections = table.remove("current_connections").unwrap().get_int();
                 let established = table.remove("established").unwrap().get_stringset();
                 if established.len() == num_connected  && num_connections == num_connected as u64 {

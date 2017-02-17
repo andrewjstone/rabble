@@ -212,7 +212,7 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
         let envelope = Envelope {
             to: correlation_id.pid.clone(),
             from: self.pid.clone(),
-            msg: Msg::ClusterStatus(self.create_status_table()),
+            msg: Msg::Status(self.create_status_table()),
             correlation_id: Some(correlation_id)
         };
         // Route the response through the executor since it knows how to contact all Pids

@@ -168,7 +168,7 @@ impl<T: Encodable + Decodable + Send + Debug + Clone> Executor<T> {
         let envelope = Envelope {
             to: correlation_id.pid.clone(),
             from: self.pid.clone(),
-            msg: Msg::ExecutorStatus(self.create_status_table()),
+            msg: Msg::Status(self.create_status_table()),
             correlation_id: Some(correlation_id)
         };
         self.route_to_service(envelope);

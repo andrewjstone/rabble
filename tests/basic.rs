@@ -25,7 +25,7 @@ fn single_service_and_handler_get_executor_status() {
     let pid2 = pid.clone();
     let handler = ThreadHandler::new(move |_node, envelope| {
         assert_eq!(envelope.to, pid);
-        assert_matches!(envelope.msg, Msg::ExecutorStatus(_));
+        assert_matches!(envelope.msg, Msg::Status(_));
     });
     let mut service = Service::new(pid2.clone(), node.clone(), handler).unwrap();
     node.executor_status(CorrelationId::pid(pid2)).unwrap();
