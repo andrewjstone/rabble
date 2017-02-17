@@ -133,7 +133,7 @@ pub fn register_test_as_service(poller: &mut Poller,
                 // Let's drain the receiver, because we may have returned from a previous poll
                 // before the previous ClusterStatus response was sent
                 while let Ok(envelope) = test_rx.try_recv() {
-                    assert_matches!(envelope.msg, Msg::Status(_));
+                    assert_matches!(envelope.msg, Msg::Status(_, _));
                 }
                 break;
             }
