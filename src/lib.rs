@@ -12,10 +12,14 @@ extern crate time;
 extern crate net2;
 extern crate libc;
 extern crate ferris;
+//extern crate hdrsample;
 
 #[macro_use]
 extern crate slog;
 extern crate slog_stdlog;
+
+#[macro_use]
+mod metrics;
 
 mod node_id;
 mod node;
@@ -24,23 +28,12 @@ mod pid;
 mod process;
 mod envelope;
 mod executor;
+mod cluster;
 mod msg;
-mod executor_msg;
-mod cluster_msg;
-mod external_msg;
-mod cluster_server;
 mod timer_wheel;
-mod executor_status;
-mod cluster_status;
 mod service;
-mod service_handler;
 mod correlation_id;
-mod thread_handler;
-mod tcp_server_handler;
-mod connection_handler;
 mod serialize;
-mod msgpack_serializer;
-mod protobuf_serializer;
 
 pub mod errors;
 
@@ -50,33 +43,42 @@ pub use node::Node;
 pub use pid::Pid;
 pub use process::Process;
 pub use envelope::Envelope;
-pub use service::Service;
 pub use correlation_id::CorrelationId;
 pub use msg::Msg;
-pub use cluster_status::ClusterStatus;
-pub use executor_status::ExecutorStatus;
 
-pub use thread_handler::ThreadHandler;
-pub use connection_handler::{
-    ConnectionHandler,
-    ConnectionMsg
+pub use cluster::{
+    ClusterServer,
+    ClusterStatus,
 };
-pub use serialize::Serialize;
-pub use msgpack_serializer::MsgpackSerializer;
-pub use protobuf_serializer::ProtobufSerializer;
-pub use tcp_server_handler::TcpServerHandler;
-pub use service_handler::ServiceHandler;
+
+pub use executor::{
+    Executor,
+    ExecutorStatus,
+    ExecutorMetrics
+};
+
+pub use service::{
+    Service,
+    ConnectionHandler,
+    ConnectionMsg,
+    ServiceHandler,
+    TcpServerHandler,
+    ThreadHandler
+};
+
+pub use serialize::{
+    Serialize,
+    MsgpackSerializer,
+    ProtobufSerializer
+};
 
 use std::thread::{self, JoinHandle};
 use std::sync::mpsc::channel;
 use std::fmt::Debug;
 use rustc_serialize::{Encodable, Decodable};
 use amy::Poller;
-use cluster_msg::ClusterMsg;
-use cluster_server::ClusterServer;
-use executor::Executor;
-
 use slog::DrainExt;
+use cluster::ClusterMsg;
 
 const TIMEOUT: usize = 5000; // ms
 
@@ -127,4 +129,3 @@ pub fn rouse<T>(node_id: NodeId, logger: Option<slog::Logger>) -> (Node<T>, Vec<
 
     (Node::new(node_id, exec_tx, cluster_tx, logger), vec![h1, h2, h3])
 }
-

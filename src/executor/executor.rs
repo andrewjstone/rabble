@@ -11,10 +11,10 @@ use pid::Pid;
 use process::Process;
 use node_id::NodeId;
 use msg::Msg;
-use executor_msg::ExecutorMsg;
-use cluster_msg::ClusterMsg;
-use executor_status::ExecutorStatus;
+use cluster::ClusterMsg;
 use correlation_id::CorrelationId;
+use metrics::Metrics;
+use super::{ExecutorStatus, ExecutorMetrics, ExecutorMsg};
 
 pub struct Executor<T: Encodable + Decodable + Send + Debug + Clone> {
     pid: Pid,
@@ -26,6 +26,7 @@ pub struct Executor<T: Encodable + Decodable + Send + Debug + Clone> {
     cluster_tx: Sender<ClusterMsg<T>>,
     timer_wheel: CopyWheel<(Pid, Option<CorrelationId>)>,
     logger: slog::Logger,
+    metrics: ExecutorMetrics
 }
 
 impl<T: Encodable + Decodable + Send + Debug + Clone> Executor<T> {
@@ -48,7 +49,8 @@ impl<T: Encodable + Decodable + Send + Debug + Clone> Executor<T> {
             rx: rx,
             cluster_tx: cluster_tx,
             timer_wheel: CopyWheel::new(vec![Resolution::TenMs, Resolution::Sec, Resolution::Min]),
-            logger: logger.new(o!("component" => "executor"))
+            logger: logger.new(o!("component" => "executor")),
+            metrics: ExecutorMetrics::new()
         }
     }
 
@@ -58,7 +60,10 @@ impl<T: Encodable + Decodable + Send + Debug + Clone> Executor<T> {
     pub fn run(mut self) {
         while let Ok(msg) = self.rx.recv() {
             match msg {
-                ExecutorMsg::Envelope(envelope) => self.route(envelope),
+                ExecutorMsg::Envelope(envelope) => {
+                    self.metrics.received_envelopes += 1;
+                    self.route(envelope);
+                },
                 ExecutorMsg::Start(pid, process) => self.start(pid, process),
                 ExecutorMsg::Stop(pid) => self.stop(pid),
                 ExecutorMsg::RegisterService(pid, tx) => {
@@ -92,7 +97,7 @@ impl<T: Encodable + Decodable + Send + Debug + Clone> Executor<T> {
         self.processes.insert(pid, process);
         for envelope in envelopes {
             if envelope.to == self.pid {
-                handle_executor_envelope(&mut self.timer_wheel, envelope, &mut self.logger);
+                self.handle_executor_envelope(envelope);
             } else {
                 self.route(envelope);
             }
@@ -131,23 +136,26 @@ impl<T: Encodable + Decodable + Send + Debug + Clone> Executor<T> {
     ///
     /// Return Ok(()) if the process exists, Err(envelope) otherwise.
     fn route_to_process(&mut self, envelope: Envelope<T>) -> Result<(), Envelope<T>> {
-        if let Some(process) = self.processes.get_mut(&envelope.to) {
+        let envelopes: Vec<_> = if let Some(process) = self.processes.get_mut(&envelope.to) {
             let Envelope {from, msg, correlation_id, ..} = envelope;
-            for envelope in process.handle(msg, from, correlation_id).drain(..) {
-                if envelope.to == self.pid {
-                    handle_executor_envelope(&mut self.timer_wheel, envelope, &mut self.logger);
-                    continue;
-                }
-                if envelope.to.node == self.node {
-                    // This won't ever fail because we hold a ref to both ends of the channel
-                    self.tx.send(ExecutorMsg::Envelope(envelope)).unwrap();
-                } else {
-                    self.cluster_tx.send(ClusterMsg::Envelope(envelope)).unwrap();
-                }
+            process.handle(msg, from, correlation_id).drain(..).collect()
+        } else {
+            return Err(envelope);
+        };
+
+        for envelope in envelopes {
+            if envelope.to == self.pid {
+                self.handle_executor_envelope(envelope);
+                continue;
             }
-            return Ok(());
+            if envelope.to.node == self.node {
+                // This won't ever fail because we hold a ref to both ends of the channel
+                self.tx.send(ExecutorMsg::Envelope(envelope)).unwrap();
+            } else {
+                self.cluster_tx.send(ClusterMsg::Envelope(envelope)).unwrap();
+            }
         }
-        Err(envelope)
+        Ok(())
     }
 
     /// Route an envelope to a service on this node
@@ -158,19 +166,35 @@ impl<T: Encodable + Decodable + Send + Debug + Clone> Executor<T> {
             warn!(self.logger, "Failed to find service"; "pid" => envelope.to.to_string());
         }
     }
-}
 
-fn handle_executor_envelope<T>(timer_wheel: &mut CopyWheel<(Pid, Option<CorrelationId>)>,
-                               envelope: Envelope<T>,
-                               logger: &mut slog::Logger)
-   where T: Encodable + Decodable + Send + Debug + Clone
-{
-    let Envelope {from, msg, correlation_id, ..} = envelope;
-    match msg {
-        Msg::StartTimer(time_in_ms) => timer_wheel.start((from, correlation_id),
-                                                         Duration::milliseconds(time_in_ms as i64)),
-        Msg::CancelTimer(correlation_id) => timer_wheel.stop((from, correlation_id)),
-        _ => error!(logger, "Invalid message sent to executor";
-                    "from" => from.to_string(), "msg" => format!("{:?}", msg))
+    fn handle_executor_envelope(&mut self, envelope: Envelope<T>) {
+        let Envelope {from, msg, correlation_id, ..} = envelope;
+        match msg {
+            Msg::StartTimer(time_in_ms) => {
+                self.timer_wheel.start((from, correlation_id),
+                                       Duration::milliseconds(time_in_ms as i64));
+                self.metrics.timers_started += 1;
+            },
+            Msg::CancelTimer(correlation_id) => {
+                self.timer_wheel.stop((from, correlation_id));
+                self.metrics.timers_cancelled += 1;
+            }
+            Msg::GetMetrics => self.send_metrics(from, correlation_id),
+            _ => error!(self.logger, "Invalid message sent to executor";
+                        "from" => from.to_string(), "msg" => format!("{:?}", msg))
+        }
+    }
+
+    fn send_metrics(&mut self, from: Pid, correlation_id: Option<CorrelationId>) {
+        self.metrics.processes = self.processes.len() as i64;
+        self.metrics.services = self.service_senders.len() as i64;
+        let envelope = Envelope {
+            to: from,
+            from: self.pid.clone(),
+            msg: Msg::Metrics(self.metrics.data()),
+            correlation_id: correlation_id
+        };
+        self.route(envelope);
     }
 }
+

@@ -3,11 +3,11 @@ use amy::{self, Poller, Registrar};
 use pid::Pid;
 use rustc_serialize::{Encodable, Decodable};
 use msg::Msg;
-use service_handler::ServiceHandler;
 use envelope::Envelope;
 use node::Node;
 use errors::*;
 use slog;
+use super::ServiceHandler;
 
 /// A system service that operates on a single thread. A service is registered via its pid
 /// with the executor and can send and receive messages to processes as well as other services.

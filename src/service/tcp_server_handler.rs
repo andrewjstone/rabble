@@ -3,15 +3,14 @@ use std::collections::HashMap;
 use std::io;
 use amy::{Registrar, Notification, Event, Timer};
 use errors::*;
-use service_handler::ServiceHandler;
 use msg::Msg;
 use envelope::Envelope;
 use node::Node;
-use connection_handler::{ConnectionHandler, ConnectionMsg};
 use timer_wheel::TimerWheel;
 use pid::Pid;
 use correlation_id::CorrelationId;
 use serialize::Serialize;
+use super::{ServiceHandler, ConnectionHandler, ConnectionMsg};
 
 // The timer wheel expirations are accurate to within 1/TIMER_WHEEL_SLOTS of the timeout
 const TIMER_WHEEL_SLOTS: usize = 10;

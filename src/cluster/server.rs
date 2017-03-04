@@ -11,16 +11,15 @@ use amy::{Registrar, Notification, Event, Timer, FrameReader, FrameWriter};
 use members::Members;
 use node_id::NodeId;
 use msg::Msg;
-use cluster_msg::ClusterMsg;
-use executor_msg::ExecutorMsg;
-use external_msg::ExternalMsg;
+use executor::ExecutorMsg;
 use timer_wheel::TimerWheel;
 use envelope::Envelope;
 use orset::{ORSet, Delta};
 use pid::Pid;
-use cluster_status::ClusterStatus;
 use correlation_id::CorrelationId;
 use errors::*;
+use metrics::Metrics;
+use super::{ClusterStatus, ClusterMsg, ExternalMsg, ClusterMetrics};
 
 // TODO: This is totally arbitrary right now and should probably be user configurable
 const MAX_FRAME_SIZE: u32 = 100*1024*1024; // 100 MB
@@ -70,7 +69,8 @@ pub struct ClusterServer<T: Encodable + Decodable + Debug + Clone> {
     connections: HashMap<usize, Conn>,
     established: HashMap<NodeId, usize>,
     registrar: Registrar,
-    logger: slog::Logger
+    logger: slog::Logger,
+    metrics: ClusterMetrics
 }
 
 impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
@@ -102,7 +102,8 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
             connections: HashMap::new(),
             established: HashMap::new(),
             registrar: registrar,
-            logger: logger.new(o!("component" => "cluster_server"))
+            logger: logger.new(o!("component" => "cluster_server")),
+            metrics: ClusterMetrics::new()
         }
     }
 
@@ -113,6 +114,7 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
         self.listener_id = self.registrar.register(&self.listener, Event::Read).unwrap();
         while let Ok(msg) = self.rx.recv() {
             if let Err(e) = self.handle_cluster_msg(msg) {
+                self.metrics.errors += 1;
                 for id in e.kind().get_ids() {
                     self.close(id)
                 }
@@ -136,12 +138,31 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
 
     fn handle_cluster_msg(&mut self, msg: ClusterMsg<T>) -> Result<()> {
         match msg {
-            ClusterMsg::PollNotifications(notifications) =>
-                self.handle_poll_notifications(notifications),
-            ClusterMsg::Join(node) => self.join(node),
-            ClusterMsg::Leave(node) => self.leave(node),
-            ClusterMsg::Envelope(envelope) => self.send_remote(envelope),
-            ClusterMsg::GetStatus(correlation_id) => self.get_status(correlation_id),
+            ClusterMsg::PollNotifications(notifications) => {
+                self.metrics.poll_notifications += 1;
+                self.handle_poll_notifications(notifications)
+            },
+            ClusterMsg::Join(node) => {
+                self.metrics.joins += 1;
+                self.join(node)
+            },
+            ClusterMsg::Leave(node) => {
+                self.metrics.leaves += 1;
+                self.leave(node)
+            },
+            ClusterMsg::Envelope(envelope) => {
+                self.metrics.received_local_envelopes += 1;
+                // Only metric requests are directly sent to the cluster server
+                if envelope.to == self.pid {
+                    self.send_metrics(envelope);
+                    return Ok(());
+                }
+                self.send_remote(envelope)
+            },
+            ClusterMsg::GetStatus(correlation_id) => {
+                self.metrics.status_requests += 1;
+                self.get_status(correlation_id)
+            },
             ClusterMsg::Shutdown => Err(ErrorKind::Shutdown(self.pid.clone()).into())
         }
     }
@@ -249,6 +270,7 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
                 self.reset_timer(id);
             }
             ExternalMsg::Envelope(envelope) => {
+                self.metrics.received_remote_envelopes += 1;
                 debug!(self.logger, "Got User Message";
                        "from" => envelope.from.to_string(),
                        "to" => envelope.to.to_string());
@@ -361,6 +383,7 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
     fn join(&mut self, node: NodeId) -> Result<()> {
         let delta = self.members.add(node.clone());
         try!(self.broadcast_delta(delta));
+        self.metrics.connection_attempts += 1;
         self.connect(node)
     }
 
@@ -387,6 +410,7 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
 
     fn accept_connection(&mut self) -> Result<()> {
         while let Ok((sock, _)) = self.listener.accept() {
+            self.metrics.accepted_connections += 1;
             debug!(self.logger, "accepted connection");
             try!(sock.set_nonblocking(true).chain_err(|| "Failed to make socket nonblocking"));
             let id = try!(self.init_connection(sock, None));
@@ -532,6 +556,7 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
                "to_disconnect" => format!("{:?}", to_disconnect));
 
         for node in to_connect {
+            self.metrics.connection_attempts += 1;
             if let Err(e) = self.connect(node) {
                 warn!(self.logger, e.to_string());
             }
@@ -565,7 +590,29 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
             }
         }
     }
+
+    fn send_metrics(&mut self, envelope: Envelope<T>) {
+        if let Msg::GetMetrics = envelope.msg {
+            error!(self.logger, "Received Unknown Msg";
+                   "envelope" => format!("{:?}", envelope));
+            return;
+        }
+        let new_envelope = Envelope {
+            to: envelope.to,
+            from: self.pid.clone(),
+            msg: Msg::Metrics(self.metrics.data()),
+            correlation_id: envelope.correlation_id
+        };
+        // Route the response through the executor since it knows how to contact all Pids
+        if let Err(mpsc::SendError(ExecutorMsg::Envelope(new_envelope))) =
+            self.executor_tx.send(ExecutorMsg::Envelope(new_envelope))
+        {
+            error!(self.logger, "Failed to send to executor";
+                   "envelope" => format!("{:?}", new_envelope));
+        }
+    }
 }
+
 fn conn_write(id: usize,
               conn: &mut Conn,
               msg: Option<Vec<u8>>,
