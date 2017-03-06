@@ -1,10 +1,10 @@
 use std::fmt::Debug;
 use rustc_serialize::{Encodable, Decodable};
-use service_handler::ServiceHandler;
 use envelope::Envelope;
 use node::Node;
 use errors::*;
 use amy::Registrar;
+use super::ServiceHandler;
 
 pub struct ThreadHandler<T: Encodable + Decodable + Debug + Clone> {
     callback: Box<Fn(&Node<T>, Envelope<T>) + Send>

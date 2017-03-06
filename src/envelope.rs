@@ -6,7 +6,7 @@ use msg::Msg;
 
 /// Envelopes are routable to processes on all nodes and threads running on the same node as this
 /// process.
-#[derive(Debug, Clone, Eq, PartialEq, RustcEncodable, RustcDecodable)]
+#[derive(Debug, Clone, PartialEq, RustcEncodable, RustcDecodable)]
 pub struct Envelope<T: Encodable + Decodable + Debug + Clone> {
     pub to: Pid,
     pub from: Pid,
