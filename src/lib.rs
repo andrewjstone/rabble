@@ -45,6 +45,7 @@ pub use process::Process;
 pub use envelope::Envelope;
 pub use correlation_id::CorrelationId;
 pub use msg::Msg;
+pub use metrics::Metric;
 
 pub use cluster::{
     ClusterServer,
