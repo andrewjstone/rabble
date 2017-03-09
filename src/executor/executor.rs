@@ -37,7 +37,7 @@ impl<T: Encodable + Decodable + Send + Debug + Clone> Executor<T> {
                logger: slog::Logger) -> Executor<T> {
         let pid = Pid {
             group: Some("rabble".to_string()),
-            name: "Executor".to_string(),
+            name: "executor".to_string(),
             node: node.clone()
         };
         Executor {
@@ -136,6 +136,18 @@ impl<T: Encodable + Decodable + Send + Debug + Clone> Executor<T> {
     ///
     /// Return Ok(()) if the process exists, Err(envelope) otherwise.
     fn route_to_process(&mut self, envelope: Envelope<T>) -> Result<(), Envelope<T>> {
+        if envelope.to == self.pid {
+            self.handle_executor_envelope(envelope);
+            return Ok(());
+        }
+
+        if &envelope.to.name == "cluster_server" &&
+            envelope.to.group.as_ref().unwrap() == "rabble"
+        {
+            self.cluster_tx.send(ClusterMsg::Envelope(envelope)).unwrap();
+            return Ok(());
+        }
+
         let envelopes: Vec<_> = if let Some(process) = self.processes.get_mut(&envelope.to) {
             let Envelope {from, msg, correlation_id, ..} = envelope;
             process.handle(msg, from, correlation_id).drain(..).collect()

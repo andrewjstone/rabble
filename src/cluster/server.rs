@@ -81,7 +81,7 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
                logger: slog::Logger) -> ClusterServer<T> {
         let pid = Pid {
             group: Some("rabble".to_string()),
-            name: "ClusterServer".to_string(),
+            name: "cluster_server".to_string(),
             node: node.clone()
         };
         // We don't want to actually start polling yet, so create a dummy timer.
@@ -593,22 +593,22 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
 
     fn send_metrics(&mut self, envelope: Envelope<T>) {
         if let Msg::GetMetrics = envelope.msg {
+            let new_envelope = Envelope {
+                to: envelope.from,
+                from: self.pid.clone(),
+                msg: Msg::Metrics(self.metrics.data()),
+                correlation_id: envelope.correlation_id
+            };
+            // Route the response through the executor since it knows how to contact all Pids
+            if let Err(mpsc::SendError(ExecutorMsg::Envelope(new_envelope))) =
+                self.executor_tx.send(ExecutorMsg::Envelope(new_envelope))
+            {
+                error!(self.logger, "Failed to send to executor";
+                    "envelope" => format!("{:?}", new_envelope));
+            }
+        } else {
             error!(self.logger, "Received Unknown Msg";
                    "envelope" => format!("{:?}", envelope));
-            return;
-        }
-        let new_envelope = Envelope {
-            to: envelope.to,
-            from: self.pid.clone(),
-            msg: Msg::Metrics(self.metrics.data()),
-            correlation_id: envelope.correlation_id
-        };
-        // Route the response through the executor since it knows how to contact all Pids
-        if let Err(mpsc::SendError(ExecutorMsg::Envelope(new_envelope))) =
-            self.executor_tx.send(ExecutorMsg::Envelope(new_envelope))
-        {
-            error!(self.logger, "Failed to send to executor";
-                   "envelope" => format!("{:?}", new_envelope));
         }
     }
 }
