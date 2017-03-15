@@ -6,6 +6,7 @@ description = "A library for creating location transparent actor based systems"
 repository = "https://github.com/andrewjstone/rabble"
 keywords = ["cluster", "networking", "distributed", "actor", "erlang"]
 license = "Apache-2.0"
+build = "build.rs"
 
 [dependencies]
 amy = "0.6"
@@ -23,6 +24,10 @@ slog-term = "1.1"
 slog-envlogger = "0.5"
 ferris = "0.1"
 protobuf = "1.0.24"
+capnp = "0.8"
 
 [dev-dependencies]
 assert_matches = "1.0"
+
+[build-dependencies]
+capnpc = "0.8"
