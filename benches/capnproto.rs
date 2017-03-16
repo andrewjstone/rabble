@@ -1,5 +1,6 @@
 #![feature(test)]
 
+extern crate test;
 extern crate capnp;
 extern crate rabble;
 
@@ -12,8 +13,6 @@ pub mod msg_capnp {
 }
 
 use msg_capnp::{pid};
-
-extern crate test;
 
 pub fn build_pid() -> ::capnp::message::Builder<HeapAllocator> {
     let mut message = ::capnp::message::Builder::new_default();
@@ -68,15 +67,9 @@ fn bench_deserialized_pid_to_rust_type(b: &mut Bencher) {
     b.iter(|| {
         let msg = reader.get_root::<pid::Reader>().unwrap();
         let node = msg.get_node().unwrap();
-        let g = msg.get_group().unwrap();
-        let group = if g.len() == 0 {
-            None
-        } else {
-            Some(g.to_string())
-        };
         Pid {
             name: msg.get_name().unwrap().to_string(),
-            group: group,
+            group: Some(msg.get_group().unwrap().to_string()),
             node: NodeId {
                 name: node.get_name().unwrap().to_string(),
                 addr: node.get_addr().unwrap().to_string()
