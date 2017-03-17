@@ -4,6 +4,7 @@ use cluster::ClusterStatus;
 use executor::ExecutorStatus;
 use correlation_id::CorrelationId;
 use metrics::Metric;
+use pid::Pid;
 
 type Name = String;
 
@@ -17,5 +18,6 @@ pub enum Msg<T: Encodable + Decodable + Debug + Clone> {
     Timeout,
     Shutdown,
     GetMetrics,
-    Metrics(Vec<(Name, Metric)>)
+    Metrics(Vec<(Name, Metric)>),
+    Pids(Vec<Pid>)
 }
