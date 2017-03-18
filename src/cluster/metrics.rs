@@ -9,5 +9,7 @@ metrics!(ClusterMetrics {
     received_remote_envelopes: u64,
     status_requests: u64,
     accepted_connections: u64,
-    connection_attempts: u64
+    connection_attempts: u64,
+    connections: i64,
+    established_connections: i64
 });

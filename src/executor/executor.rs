@@ -1,5 +1,3 @@
-use rustc_serialize::{Encodable, Decodable};
-use std::fmt::Debug;
 use std::sync::mpsc::{Sender, Receiver};
 use std::collections::HashMap;
 use amy;
@@ -10,26 +8,27 @@ use envelope::Envelope;
 use pid::Pid;
 use process::Process;
 use node_id::NodeId;
-use msg::Msg;
+use msg::{Msg, Req, Rpy};
 use cluster::ClusterMsg;
 use correlation_id::CorrelationId;
 use metrics::Metrics;
-use super::{ExecutorStatus, ExecutorMetrics, ExecutorMsg};
+use user_msg::UserMsg;
+use super::{ExecutorMetrics, ExecutorMsg};
 
-pub struct Executor<T: Encodable + Decodable + Send + Debug + Clone> {
+pub struct Executor<T: UserMsg> {
     pid: Pid,
     node: NodeId,
-    processes: HashMap<Pid, Box<Process<Msg=T>>>,
+    processes: HashMap<Pid, Box<Process<T>>>,
     service_senders: HashMap<Pid, amy::Sender<Envelope<T>>>,
     tx: Sender<ExecutorMsg<T>>,
     rx: Receiver<ExecutorMsg<T>>,
     cluster_tx: Sender<ClusterMsg<T>>,
-    timer_wheel: CopyWheel<(Pid, Option<CorrelationId>)>,
+    timer_wheel: CopyWheel<(Pid, CorrelationId)>,
     logger: slog::Logger,
     metrics: ExecutorMetrics
 }
 
-impl<T: Encodable + Decodable + Send + Debug + Clone> Executor<T> {
+impl<T: UserMsg> Executor<T> {
     pub fn new(node: NodeId,
                tx: Sender<ExecutorMsg<T>>,
                rx: Receiver<ExecutorMsg<T>>,
@@ -69,7 +68,6 @@ impl<T: Encodable + Decodable + Send + Debug + Clone> Executor<T> {
                 ExecutorMsg::RegisterService(pid, tx) => {
                     self.service_senders.insert(pid, tx);
                 },
-                ExecutorMsg::GetStatus(correlation_id) => self.get_status(correlation_id),
                 ExecutorMsg::Tick => self.tick(),
 
                 // Just return so the thread exits
@@ -78,21 +76,7 @@ impl<T: Encodable + Decodable + Send + Debug + Clone> Executor<T> {
         }
     }
 
-    fn get_status(&self, correlation_id: CorrelationId) {
-        let status = ExecutorStatus {
-            total_processes: self.processes.len(),
-            services: self.service_senders.keys().cloned().collect()
-        };
-        let envelope = Envelope {
-            to: correlation_id.pid.clone(),
-            from: self.pid.clone(),
-            msg: Msg::ExecutorStatus(status),
-            correlation_id: Some(correlation_id)
-        };
-        self.route_to_service(envelope);
-    }
-
-    fn start(&mut self, pid: Pid, mut process: Box<Process<Msg=T>>) {
+    fn start(&mut self, pid: Pid, mut process: Box<Process<T>>) {
         let envelopes = process.init(self.pid.clone());
         self.processes.insert(pid, process);
         for envelope in envelopes {
@@ -110,7 +94,12 @@ impl<T: Encodable + Decodable + Send + Debug + Clone> Executor<T> {
 
     fn tick(&mut self) {
         for (pid, c_id) in self.timer_wheel.expire() {
-            let envelope = Envelope::new(pid, self.pid.clone(), Msg::Timeout, c_id);
+            let envelope = Envelope {
+                to: pid,
+                from: self.pid.clone(),
+                msg: Msg::Rpy(Rpy::Timeout),
+                correlation_id: c_id
+            };
             let _ = self.route_to_process(envelope);
         }
     }
@@ -182,28 +171,28 @@ impl<T: Encodable + Decodable + Send + Debug + Clone> Executor<T> {
     fn handle_executor_envelope(&mut self, envelope: Envelope<T>) {
         let Envelope {from, msg, correlation_id, ..} = envelope;
         match msg {
-            Msg::StartTimer(time_in_ms) => {
+            Msg::Req(Req::StartTimer(time_in_ms)) => {
                 self.timer_wheel.start((from, correlation_id),
                                        Duration::milliseconds(time_in_ms as i64));
                 self.metrics.timers_started += 1;
             },
-            Msg::CancelTimer(correlation_id) => {
+            Msg::Req(Req::CancelTimer) => {
                 self.timer_wheel.stop((from, correlation_id));
                 self.metrics.timers_cancelled += 1;
             }
-            Msg::GetMetrics => self.send_metrics(from, correlation_id),
+            Msg::Req(Req::GetMetrics) => self.send_metrics(from, correlation_id),
             _ => error!(self.logger, "Invalid message sent to executor";
                         "from" => from.to_string(), "msg" => format!("{:?}", msg))
         }
     }
 
-    fn send_metrics(&mut self, from: Pid, correlation_id: Option<CorrelationId>) {
+    fn send_metrics(&mut self, from: Pid, correlation_id: CorrelationId) {
         self.metrics.processes = self.processes.len() as i64;
         self.metrics.services = self.service_senders.len() as i64;
         let envelope = Envelope {
             to: from,
             from: self.pid.clone(),
-            msg: Msg::Metrics(self.metrics.data()),
+            msg: Msg::Rpy(Rpy::Metrics(self.metrics.data())),
             correlation_id: correlation_id
         };
         self.route(envelope);

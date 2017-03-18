@@ -1,6 +1,10 @@
 use std::fmt::{Display, Error, Formatter};
 use std::str::FromStr;
+use std::convert::From;
+use pb_messages;
 
+// RustcEncodable/RustcDecodable still required because of ORSet usage and also so that
+// MsgpackSerializer can use NodeId
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Ord, PartialOrd, RustcEncodable, RustcDecodable)]
 pub struct NodeId {
     pub name: String,
@@ -26,5 +30,23 @@ impl FromStr for NodeId {
             name: v[0].to_string(),
             addr: v[1].to_string()
         })
+    }
+}
+
+impl From<pb_messages::NodeId> for NodeId {
+    fn from(mut pb_node_id: pb_messages::NodeId) -> NodeId {
+        NodeId {
+            name: pb_node_id.take_name(),
+            addr: pb_node_id.take_addr()
+        }
+    }
+}
+
+impl From<NodeId> for pb_messages::NodeId {
+    fn from(node_id: NodeId) -> pb_messages::NodeId {
+        let mut pb_node_id = pb_messages::NodeId::new();
+        pb_node_id.set_name(node_id.name);
+        pb_node_id.set_addr(node_id.addr);
+        pb_node_id
     }
 }

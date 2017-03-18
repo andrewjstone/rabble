@@ -5,13 +5,13 @@ extern crate rabble;
 extern crate assert_matches;
 extern crate rustc_serialize;
 
-#[macro_use]
 extern crate slog;
 extern crate slog_stdlog;
 extern crate slog_envlogger;
 extern crate slog_term;
 extern crate log;
 extern crate time;
+extern crate protobuf;
 
 mod utils;
 
@@ -33,6 +33,8 @@ use rabble::{
     Process,
     Envelope,
     Msg,
+    Req,
+    Rpy,
     MsgpackSerializer,
     Serialize,
     Node,
@@ -63,34 +65,33 @@ fn connection_timeout() {
 struct TestProcess {
     pid: Pid,
     executor_pid: Option<Pid>,
-    output: Vec<Envelope<()>>,
+    output: Vec<Envelope<RabbleUserMsg>>,
 
     /// Don't do this in production!!!
     /// This is only hear to signal to the test that it has received a message.
     tx: mpsc::Sender<()>
 }
 
-impl Process for TestProcess {
-    type Msg = ();
+impl Process<RabbleUserMsg> for TestProcess {
 
-    fn init(&mut self, executor_pid: Pid) -> Vec<Envelope<()>> {
+    fn init(&mut self, executor_pid: Pid) -> Vec<Envelope<RabbleUserMsg>> {
         self.executor_pid = Some(executor_pid);
         // Start a timer with a 100ms timeout and no correlation id. We don't need one
         // since there is only one timer in this example
-        vec![Envelope::new(self.executor_pid.as_ref().unwrap().clone(),
-                           self.pid.clone(),
-                           Msg::StartTimer(100),
-                           None)]
+        vec![Envelope {
+            to: self.executor_pid.as_ref().unwrap().clone(),
+            from: self.pid.clone(),
+            msg: Msg::Req(Req::StartTimer(100)),
+            correlation_id: CorrelationId::pid(self.pid.clone())}]
     }
 
     fn handle(&mut self,
-              msg: Msg<()>,
+              msg: Msg<RabbleUserMsg>,
               from: Pid,
-              correlation_id: Option<CorrelationId>) -> &mut Vec<Envelope<()>>
+              _: CorrelationId) -> &mut Vec<Envelope<RabbleUserMsg>>
     {
         assert_eq!(from, *self.executor_pid.as_ref().unwrap());
-        assert_eq!(msg, Msg::Timeout);
-        assert_eq!(correlation_id, None);
+        assert_eq!(msg, Msg::Rpy(Rpy::Timeout));
         self.tx.send(()).unwrap();
         &mut self.output
     }
@@ -99,7 +100,7 @@ impl Process for TestProcess {
 #[test]
 fn process_timeout() {
     let node_id = NodeId {name: "node1".to_string(), addr: "127.0.0.1:11002".to_string()};
-    let (node, handles) = rabble::rouse::<()>(node_id.clone(), None);
+    let (node, handles) = rabble::rouse::<RabbleUserMsg>(node_id.clone(), None);
 
     let pid = Pid {
         name: "some-process".to_string(),
@@ -149,9 +150,9 @@ fn shutdown(node: Node<RabbleUserMsg>,
     let from = Pid {name: "test-runner".to_string(), group: None, node: node.id.clone()};
     let shutdown_envelope = Envelope {
         to: service_pid,
-        from: from,
-        msg: Msg::Shutdown,
-        correlation_id: None
+        from: from.clone(),
+        msg: Msg::Req(Req::Shutdown),
+        correlation_id: CorrelationId::pid(from)
     };
     service_tx.send(shutdown_envelope).unwrap();
     node.shutdown();

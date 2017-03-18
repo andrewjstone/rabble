@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::io;
 use amy::{Registrar, Notification, Event, Timer};
 use errors::*;
-use msg::Msg;
+use msg::{Msg, Rpy};
 use envelope::Envelope;
 use node::Node;
 use timer_wheel::TimerWheel;
@@ -165,8 +165,8 @@ impl <C,S> TcpServerHandler<C, S>
                 let envelope = Envelope {
                     from: self.pid.clone(),
                     to: self.pid.clone(),
-                    msg: Msg::Timeout,
-                    correlation_id: Some(correlation_id.clone())
+                    msg: Msg::Rpy(Rpy::Timeout),
+                    correlation_id: correlation_id.clone()
                 };
                 let responses = connection.handler.handle_envelope(envelope);
                 try!(handle_connection_msgs(&mut self.request_timer_wheel,
@@ -245,12 +245,9 @@ impl<C, S> ServiceHandler<C::Msg> for TcpServerHandler<C, S>
                        envelope: Envelope<C::Msg>,
                        _registrar: &Registrar) -> Result<()>
     {
-        if envelope.correlation_id.is_none() {
-            return Err(format!("No correlation id for envelope {:?}", envelope).into());
-        }
         // Don't bother cancelling request timers... Just ignore the timeouts in the connection if
         // the request has already received its reply
-        let conn_id = envelope.correlation_id.as_ref().unwrap().connection.as_ref().cloned().unwrap();
+        let conn_id = envelope.correlation_id.connection.as_ref().cloned().unwrap();
         if let Some(mut connection) = self.connections.get_mut(&(conn_id as usize)) {
             let responses = connection.handler.handle_envelope(envelope);
             try!(handle_connection_msgs(&mut self.request_timer_wheel,
@@ -308,9 +305,7 @@ fn handle_connection_msgs<C, S>(request_timer_wheel: &mut TimerWheel<Correlation
     for m in msgs.drain(..) {
         match m {
             ConnectionMsg::Envelope(envelope) => {
-                if envelope.correlation_id.is_some() {
-                    request_timer_wheel.insert(envelope.correlation_id.as_ref().unwrap().clone());
-                }
+                request_timer_wheel.insert(envelope.correlation_id.clone());
                 node.send(envelope).unwrap();
             },
             ConnectionMsg::Client(client_msg, _) => {
