@@ -1,15 +1,70 @@
 // Copyright © 2016-2017 VMware, Inc. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
-// Use proto2 syntax because proto3 doesn't generate hasXXX methods in java, unlike proto2.
-syntax = "proto2";
+syntax = "proto3";
 
 message NodeId {
-  optional string name = 1;
-  optional string addr = 2;
+  string name = 1;
+  string addr = 2;
+}
+
+message Pids {
+  repeated Pid pids = 1;
 }
 
 message Pid {
-  optional string name = 1;
-  optional string group = 2;
-  optional NodeId node = 3;
+  string name = 1;
+  string group = 2;
+  NodeId node = 3;
+}
+
+message CorrelationId {
+  Pid pid = 1;
+  uint64 handle = 2;
+  uint64 request = 3;
+}
+
+message Envelope {
+  Pid to = 1;
+  Pid from = 2;
+  Msg msg = 3;
+  CorrelationId cid = 4;
+}
+
+message Msg {
+  oneof request {
+	bool get_metrics = 1;
+	int64 start_timer = 2; 
+	bool cancel_timer = 3;
+	bool shutdown = 4;
+	NodeId get_processes = 5;
+	NodeId get_services = 6;
+  }
+  oneof reply {
+    Metrics metrics = 1000;
+    bool timeout = 1001;
+    Pids processes = 1002;
+    Pids services = 1003;
+    Members members = 1004;
+  }
+}
+
+message Members {
+  repeated Member members = 1;
+}
+
+message Member {
+  NodeId node = 1;
+  bool connected = 2;
+}
+
+message Metrics {
+  repeated Metric metrics = 1;
+}
+
+message Metric {
+  oneof metric {
+    int64 gauge = 1;
+    uint64 counter = 2;
+    bytes v2_serialized_histogram = 3;
+  }
 }

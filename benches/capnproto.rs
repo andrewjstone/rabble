@@ -179,6 +179,34 @@ fn bench_deserialized_envelope_of_processes_to_rust_type(b: &mut Bencher) {
     });
 }
 
+#[bench]
+fn access_a_variable_from_reader(b: &mut Bencher) {
+    let envelope = build_envelope_of_processes();
+    let words = ::capnp::serialize::write_message_to_words(&envelope);
+    let reader = ::capnp::serialize::read_message_from_words(&words, ReaderOptions::new()).unwrap();
+    let envelope = reader.get_root::<envelope::Reader>().unwrap();
+    b.iter(|| envelope.get_to().unwrap().get_name());
+}
+
+#[bench]
+fn access_a_variable_from_struct(b: &mut Bencher) {
+    let pid = Pid {
+        name: "some-pid".to_string(),
+        group: Some("some group".to_string()),
+        node: NodeId {
+            name: "some node".to_string(),
+            addr: "some addr".to_string()
+        }
+    };
+    let envelope = Envelope::<u64> {
+        to: pid.clone(),
+        from: pid.clone(),
+        correlation_id: Some(CorrelationId::pid(pid)),
+        msg: Msg::Timeout
+    };
+    b.iter(|| &envelope.to.name)
+}
+
 fn get_pid(reader: pid::Reader) -> Pid {
     let node = reader.get_node().unwrap();
     Pid {
