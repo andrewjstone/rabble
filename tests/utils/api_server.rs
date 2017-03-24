@@ -7,6 +7,7 @@ use rabble::{
     Envelope,
     CorrelationId,
     Msg,
+    Rpy,
     MsgpackSerializer,
     TcpServerHandler,
     Service,
@@ -66,7 +67,7 @@ impl ConnectionHandler for ApiServerConnectionHandler {
         -> &mut Vec<ConnectionMsg<ApiServerConnectionHandler>>
     {
         let Envelope {msg, correlation_id, ..} = envelope;
-        let correlation_id = correlation_id.unwrap();
+        let correlation_id = correlation_id;
         match msg {
             Msg::User(RabbleUserMsg::History(h)) => {
                 self.output.push(ConnectionMsg::Client(ApiClientMsg::History(h), correlation_id));
@@ -74,7 +75,7 @@ impl ConnectionHandler for ApiServerConnectionHandler {
             Msg::User(RabbleUserMsg::OpComplete) => {
                 self.output.push(ConnectionMsg::Client(ApiClientMsg::OpComplete, correlation_id));
             },
-            Msg::Timeout => {
+            Msg::Rpy(Rpy::Timeout) => {
                 self.output.push(ConnectionMsg::Client(ApiClientMsg::Timeout, correlation_id));
             },
             _ => unreachable!()
@@ -106,7 +107,12 @@ impl ApiServerConnectionHandler {
         let msg = Msg::User(user_msg);
         let correlation_id = CorrelationId::request(self.pid.clone(), self.id, self.total_requests);
         self.total_requests += 1;
-        let envelope = Envelope::new(to, self.pid.clone(), msg, Some(correlation_id));
+        let envelope = Envelope {
+            to: to,
+            from: self.pid.clone(),
+            msg: msg,
+            correlation_id: correlation_id
+        };
         self.output.push(ConnectionMsg::Envelope(envelope));
     }
 }

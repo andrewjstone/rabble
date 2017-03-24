@@ -1,16 +1,14 @@
 use std::sync::mpsc::Sender;
-use std::fmt::Debug;
-use rustc_serialize::{Encodable, Decodable};
 use node_id::NodeId;
-use executor::ExecutorMsg;
-use cluster::ClusterMsg;
 use pid::Pid;
-use correlation_id::CorrelationId;
 use process::Process;
 use envelope::Envelope;
 use amy;
 use errors::*;
 use slog;
+use user_msg::UserMsg;
+use cluster::ClusterMsg;
+use executor::ExecutorMsg;
 
 macro_rules! send {
     ($s:ident.$t:ident, $msg:expr, $pid:expr, $errmsg:expr) => {
@@ -27,14 +25,14 @@ macro_rules! send {
 /// The Node api is used by services and their handlers to send messages, get status, join
 /// nodes into a cluster, etc...
 #[derive(Clone)]
-pub struct Node<T: Encodable + Decodable + Debug + Clone> {
+pub struct Node<T: UserMsg> {
     pub id: NodeId,
     pub logger: slog::Logger,
     executor_tx: Sender<ExecutorMsg<T>>,
     cluster_tx: Sender<ClusterMsg<T>>
 }
 
-impl<T: Encodable + Decodable + Debug + Clone> Node<T> {
+impl<T: UserMsg> Node<T> {
     /// Create a new node. This function should not be called by the user directly. It is called by
     /// by the user call to `rabble::rouse(..)` that initializes a rabble system for a single node.
     pub fn new(id: NodeId,
@@ -72,7 +70,7 @@ impl<T: Encodable + Decodable + Debug + Clone> Node<T> {
     }
 
     /// Add a process to the executor that can be sent Envelopes addressed to its pid
-    pub fn spawn(&self, pid: &Pid, process: Box<Process<Msg=T>>) -> Result<()> {
+    pub fn spawn(&self, pid: &Pid, process: Box<Process<T>>) -> Result<()> {
         send!(self.executor_tx,
               ExecutorMsg::Start(pid.clone(), process),
               Some(pid),
@@ -104,24 +102,6 @@ impl<T: Encodable + Decodable + Debug + Clone> Node<T> {
               ExecutorMsg::Envelope(envelope),
               Some(&to),
               "ExecutorMsg::Envelope(envelope)".to_string())
-    }
-
-    /// Get the status of the executor
-    pub fn executor_status(&self, correlation_id: CorrelationId) -> Result<()> {
-        let to = correlation_id.pid.clone();
-        send!(self.executor_tx,
-              ExecutorMsg::GetStatus(correlation_id),
-              Some(&to),
-              "ExecutorMsg::GetStatus".to_string())
-    }
-
-    /// Get the status of the cluster server
-    pub fn cluster_status(&self, correlation_id: CorrelationId) -> Result<()> {
-        let to = correlation_id.pid.clone();
-        send!(self.cluster_tx,
-              ClusterMsg::GetStatus(correlation_id),
-              Some(&to),
-              "ClusterMsg::GetStatus".to_string())
     }
 
     /// Shutdown the node
