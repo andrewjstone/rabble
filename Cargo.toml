@@ -8,7 +8,7 @@ keywords = ["cluster", "networking", "distributed", "actor", "erlang"]
 license = "Apache-2.0"
 
 [dependencies]
-amy = "0.6"
+amy = "0.7"
 orset = "0.1"
 rustc-serialize = "0.3"
 rmp-serialize = "0.8"

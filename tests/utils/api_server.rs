@@ -33,7 +33,7 @@ pub fn start(node: Node<RabbleUserMsg>)
     let handler: TcpServerHandler<ApiServerConnectionHandler, MsgpackSerializer<ApiClientMsg>> =
         TcpServerHandler::new(server_pid.clone(), API_SERVER_IP, 5000, None);
     let mut service = Service::new(server_pid, node, handler).unwrap();
-    let service_tx = service.tx.clone();
+    let service_tx = service.tx.try_clone().unwrap();
     let service_pid = service.pid.clone();
     let h = thread::spawn(move || {
         service.wait();

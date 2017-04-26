@@ -101,7 +101,7 @@ pub fn rouse<T>(node_id: NodeId, logger: Option<slog::Logger>) -> (Node<T>, Vec<
     let cluster_server = ClusterServer::new(node_id.clone(),
                                             cluster_rx,
                                             exec_tx.clone(),
-                                            poller.get_registrar(),
+                                            poller.get_registrar().unwrap(),
                                             logger.clone());
     let executor = Executor::new(node_id.clone(),
                                  exec_tx.clone(),

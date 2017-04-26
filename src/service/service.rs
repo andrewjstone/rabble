@@ -31,10 +31,10 @@ impl<T, H> Service<T, H>
 {
     pub fn new(pid: Pid, node: Node<T>, mut handler: H) -> Result<Service<T, H>> {
         let poller = Poller::new().unwrap();
-        let registrar = poller.get_registrar();
-        let (tx, rx) = registrar.channel().unwrap();
-        try!(node.register_service(&pid, &tx));
-        try!(handler.init(&registrar, &node));
+        let mut registrar = poller.get_registrar()?;
+        let (tx, rx) = registrar.channel()?;
+        node.register_service(&pid, &tx)?;
+        handler.init(&registrar, &node)?;
         let logger = node.logger.new(o!("component" => "service", "pid" => pid.to_string()));
         Ok(Service {
             pid: pid,

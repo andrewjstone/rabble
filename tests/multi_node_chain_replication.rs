@@ -5,7 +5,6 @@ extern crate rabble;
 extern crate assert_matches;
 extern crate rustc_serialize;
 
-#[macro_use]
 extern crate slog;
 extern crate slog_stdlog;
 extern crate slog_envlogger;
@@ -57,7 +56,7 @@ fn chain_replication() {
     // We register the sender with all nodes so that we can check the responses to admin calls
     // like node.get_cluster_status().
     let mut poller = Poller::new().unwrap();
-    let (test_tx, test_rx) = poller.get_registrar().channel().unwrap();
+    let (test_tx, test_rx) = poller.get_registrar().unwrap().channel().unwrap();
 
     register_test_as_service(&mut poller, &nodes, &test_tx, &test_rx);
 

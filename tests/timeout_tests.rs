@@ -5,7 +5,6 @@ extern crate rabble;
 extern crate assert_matches;
 extern crate rustc_serialize;
 
-#[macro_use]
 extern crate slog;
 extern crate slog_stdlog;
 extern crate slog_envlogger;
