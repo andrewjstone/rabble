@@ -41,7 +41,7 @@ use rabble::{
     CorrelationId
 };
 
-const API_SERVER_IP: &'static str = "127.0.0.1:12001";
+const API_SERVER_IP: &'static str = "127.0.0.1:22001";
 const NUM_NODES: usize = 3;
 
 type CrNode = Node<RabbleUserMsg>;
