@@ -17,7 +17,7 @@ use rabble::{
 use super::messages::{RabbleUserMsg, ApiClientMsg};
 
 #[allow(dead_code)] // Not used in all tests
-const API_SERVER_IP: &'static str  = "127.0.0.1:12001";
+const API_SERVER_IP: &'static str  = "127.0.0.1:22001";
 
 #[allow(dead_code)] // Not used in all tests
 pub fn start(node: Node<RabbleUserMsg>)
@@ -33,7 +33,7 @@ pub fn start(node: Node<RabbleUserMsg>)
     let handler: TcpServerHandler<ApiServerConnectionHandler, MsgpackSerializer<ApiClientMsg>> =
         TcpServerHandler::new(server_pid.clone(), API_SERVER_IP, 5000, None);
     let mut service = Service::new(server_pid, node, handler).unwrap();
-    let service_tx = service.tx.clone();
+    let service_tx = service.tx.try_clone().unwrap();
     let service_pid = service.pid.clone();
     let h = thread::spawn(move || {
         service.wait();

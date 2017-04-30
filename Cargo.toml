@@ -7,8 +7,12 @@ repository = "https://github.com/andrewjstone/rabble"
 keywords = ["cluster", "networking", "distributed", "actor", "erlang"]
 license = "Apache-2.0"
 
+[features]
+# reexport no_timerfd feature from amy
+no_timerfd = ["amy/no_timerfd"]
+
 [dependencies]
-amy = "0.6"
+amy = "0.7"
 orset = "0.1"
 rustc-serialize = "0.3"
 rmp-serialize = "0.8"

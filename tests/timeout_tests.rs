@@ -5,7 +5,6 @@ extern crate rabble;
 extern crate assert_matches;
 extern crate rustc_serialize;
 
-#[macro_use]
 extern crate slog;
 extern crate slog_stdlog;
 extern crate slog_envlogger;
@@ -41,7 +40,7 @@ use rabble::{
 };
 
 const CLUSTER_SERVER_IP: &'static str = "127.0.0.1:11001";
-const API_SERVER_IP: &'static str = "127.0.0.1:12001";
+const API_SERVER_IP: &'static str = "127.0.0.1:22001";
 
 #[test]
 fn connection_timeout() {

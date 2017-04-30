@@ -92,7 +92,7 @@ impl<T: Encodable + Decodable + Debug + Clone> Node<T> {
     pub fn register_service(&self, pid: &Pid, tx: &amy::Sender<Envelope<T>>) -> Result<()>
     {
         send!(self.executor_tx,
-              ExecutorMsg::RegisterService(pid.clone(), tx.clone()),
+              ExecutorMsg::RegisterService(pid.clone(), tx.try_clone()?),
               Some(pid),
               format!("ExecutorMsg::RegisterService({}, ..)", pid))
     }

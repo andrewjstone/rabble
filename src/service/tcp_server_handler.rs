@@ -1,7 +1,7 @@
 use std::net::{TcpListener, TcpStream};
 use std::collections::HashMap;
 use std::io;
-use amy::{Registrar, Notification, Event, Timer};
+use amy::{Registrar, Notification, Event};
 use errors::*;
 use msg::Msg;
 use envelope::Envelope;
@@ -55,10 +55,10 @@ pub struct TcpServerHandler<C, S>
     listener_id: usize,
     connections: HashMap<usize, Connection<C, S>>,
     connection_timeout: Option<usize>, // ms
-    connection_timer: Option<Timer>,
+    connection_timer_id: Option<usize>,
     connection_timer_wheel: Option<TimerWheel<usize>>,
     request_timeout: usize, // ms
-    request_timer: Timer,
+    request_timer_id: usize,
     request_timer_wheel: TimerWheel<CorrelationId>
 }
 
@@ -91,10 +91,10 @@ impl <C,S> TcpServerHandler<C, S>
             listener_id: 0,
             connections: HashMap::new(),
             connection_timeout: connection_timeout,
-            connection_timer: None,
+            connection_timer_id: None,
             connection_timer_wheel: connection_timer_wheel,
             request_timeout: request_timeout,
-            request_timer: Timer {id: 0, fd: 0}, // Dummy timer for now. Will be set in init()
+            request_timer_id: 0, // Dummy timer id for now. Will be set in init()
             request_timer_wheel: TimerWheel::new(TIMER_WHEEL_SLOTS + 1)
         }
     }
@@ -194,12 +194,12 @@ impl<C, S> ServiceHandler<C::Msg> for TcpServerHandler<C, S>
                                 .chain_err(|| "Failed to register listener"));
 
         let req_timeout = self.request_timeout / TIMER_WHEEL_SLOTS;
-        self.request_timer = try!(registrar.set_interval(req_timeout)
+        self.request_timer_id = try!(registrar.set_interval(req_timeout)
                                   .chain_err(|| "Failed to register request timer"));
 
         if self.connection_timeout.is_some() {
             let timeout = self.connection_timeout.unwrap() / TIMER_WHEEL_SLOTS;
-            self.connection_timer = Some(try!(registrar.set_interval(timeout)
+            self.connection_timer_id = Some(try!(registrar.set_interval(timeout)
                               .chain_err(|| "Failed to register connection timer")));
         }
         Ok(())
@@ -215,15 +215,13 @@ impl<C, S> ServiceHandler<C::Msg> for TcpServerHandler<C, S>
             return self.accept_connections(registrar);
         }
 
-        if notification.id == self.request_timer.get_id() {
-            self.request_timer.arm();
+        if notification.id == self.request_timer_id {
             return self.request_tick(&node);
         }
 
-        if self.connection_timer.is_some()
-            && notification.id == self.connection_timer.as_ref().unwrap().get_id()
+        if self.connection_timer_id.is_some()
+            && notification.id == self.connection_timer_id.unwrap()
         {
-            self.connection_timer.as_ref().unwrap().arm();
             self.connection_tick(&registrar);
             return Ok(());
         }

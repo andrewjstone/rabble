@@ -26,7 +26,7 @@ use rabble::{
 };
 
 const CLUSTER_SERVER_IP: &'static str = "127.0.0.1:11001";
-const API_SERVER_IP: &'static str  = "127.0.0.1:12001";
+const API_SERVER_IP: &'static str  = "127.0.0.1:22001";
 
 #[test]
 fn chain_replication() {

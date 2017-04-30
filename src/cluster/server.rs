@@ -7,7 +7,7 @@ use net2::{TcpBuilder, TcpStreamExt};
 use rustc_serialize::{Encodable, Decodable};
 use msgpack::{Encoder, Decoder};
 use slog;
-use amy::{Registrar, Notification, Event, Timer, FrameReader, FrameWriter};
+use amy::{Registrar, Notification, Event, FrameReader, FrameWriter};
 use members::Members;
 use node_id::NodeId;
 use msg::Msg;
@@ -60,8 +60,8 @@ pub struct ClusterServer<T: Encodable + Decodable + Debug + Clone> {
     node: NodeId,
     rx: Receiver<ClusterMsg<T>>,
     executor_tx: Sender<ExecutorMsg<T>>,
-    executor_timer: Timer,
-    timer: Timer,
+    executor_timer_id: usize,
+    timer_id: usize,
     timer_wheel: TimerWheel<usize>,
     listener: TcpListener,
     listener_id: usize,
@@ -84,8 +84,6 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
             name: "cluster_server".to_string(),
             node: node.clone()
         };
-        // We don't want to actually start polling yet, so create a dummy timer.
-        let dummy_timer = Timer {id: 0, fd: 0};
         let listener = TcpListener::bind(&node.addr[..]).unwrap();
         listener.set_nonblocking(true).unwrap();
         ClusterServer {
@@ -93,8 +91,8 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
             node: node.clone(),
             rx: rx,
             executor_tx: executor_tx,
-            executor_timer: dummy_timer.clone(),
-            timer: dummy_timer,
+            executor_timer_id: 0,
+            timer_id: 0,
             timer_wheel: TimerWheel::new(REQUEST_TIMEOUT / TICK_TIME),
             listener: listener,
             listener_id: 0,
@@ -109,8 +107,8 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
 
     pub fn run(mut self) {
         info!(self.logger, "Starting");
-        self.timer = self.registrar.set_interval(TICK_TIME).unwrap();
-        self.executor_timer = self.registrar.set_interval(EXECUTOR_TICK_TIME).unwrap();
+        self.timer_id = self.registrar.set_interval(TICK_TIME).unwrap();
+        self.executor_timer_id = self.registrar.set_interval(EXECUTOR_TICK_TIME).unwrap();
         self.listener_id = self.registrar.register(&self.listener, Event::Read).unwrap();
         while let Ok(msg) = self.rx.recv() {
             if let Err(e) = self.handle_cluster_msg(msg) {
@@ -207,8 +205,8 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
         for n in notifications {
             let result = match n.id {
                 id if id == self.listener_id => self.accept_connection(),
-                id if id == self.timer.id => self.tick(),
-                id if id == self.executor_timer.id => self.tick_executor(),
+                id if id == self.timer_id => self.tick(),
+                id if id == self.executor_timer_id => self.tick_executor(),
                 _ => self.do_socket_io(n)
             };
 
@@ -444,7 +442,6 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
 
     fn tick(&mut self) -> Result<()> {
         trace!(self.logger, "tick");
-        self.timer.arm();
         let expired = self.timer_wheel.expire();
         self.deregister(expired);
         try!(self.broadcast_pings());
@@ -454,7 +451,6 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
 
     fn tick_executor(&mut self) -> Result<()> {
         trace!(self.logger, "tick_executor");
-        self.executor_timer.arm();
         // Panic if the executor is down.
         self.executor_tx.send(ExecutorMsg::Tick).unwrap() ;
         Ok(())
