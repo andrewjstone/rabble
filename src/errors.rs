@@ -14,10 +14,6 @@ error_chain! {
     }
 
     errors {
-        ProtobufDecodeError(msg: &'static str) {
-            description("Failed to decode protobuf message")
-            display("Failed to decode protobuf message: {}", msg)
-        }
         EncodeError(id: Option<usize>, to: Option<NodeId>) {
             description("Failed to encode message")
             display("Failed to encode message to {:?}, id={:?}", to, id)

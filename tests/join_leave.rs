@@ -7,13 +7,13 @@ extern crate rabble;
 extern crate assert_matches;
 extern crate rustc_serialize;
 
+#[macro_use]
 extern crate slog;
 extern crate slog_stdlog;
 extern crate slog_envlogger;
 extern crate slog_term;
 extern crate log;
 extern crate time;
-extern crate protobuf;
 
 mod utils;
 
@@ -26,16 +26,13 @@ use utils::{
     wait_for,
     start_nodes,
     test_pid,
-    register_test_as_service,
-    connections_stable,
-    cluster_server_pid
+    register_test_as_service
 };
 
 use rabble::{
     Envelope,
     Msg,
-    Req,
-    Rpy,
+    ClusterStatus,
     Node,
     CorrelationId
 };
@@ -97,16 +94,15 @@ fn wait_for_cluster_status(node: &Node<RabbleUserMsg>,
                            num_connected: usize) -> bool
 {
     let timeout = Duration::seconds(5);
+    let test_pid = test_pid(node.id.clone());
     wait_for(timeout, || {
-        node.send(Envelope {
-            to: cluster_server_pid(node.id.clone()),
-            from: test_pid(node.id.clone()),
-            msg: Msg::Req(Req::GetMetrics),
-            correlation_id: CorrelationId::pid(test_pid(node.id.clone()))
-        }).unwrap();
+        let correlation_id = CorrelationId::pid(test_pid.clone());
+        node.cluster_status(correlation_id.clone()).unwrap();
         if let Ok(envelope) = test_rx.try_recv() {
-            if let Msg::Rpy(Rpy::Metrics(metrics)) = envelope.msg {
-                if connections_stable(num_connected as i64, metrics) {
+            if let Msg::ClusterStatus(ClusterStatus{established, num_connections, ..})
+                = envelope.msg
+            {
+                if established.len() == num_connected  && num_connections == num_connected {
                     return true;
                 }
             }

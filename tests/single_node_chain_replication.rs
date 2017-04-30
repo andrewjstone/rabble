@@ -1,18 +1,12 @@
 extern crate amy;
 extern crate rabble;
-extern crate slog;
-extern crate slog_term;
-extern crate slog_envlogger;
-extern crate slog_stdlog;
-extern crate time;
 #[macro_use]
 extern crate assert_matches;
 extern crate rustc_serialize;
-extern crate protobuf;
 
 mod utils;
 
-use std::thread;
+use std::{thread, time};
 use std::net::TcpStream;
 use std::str;
 use amy::Sender;
@@ -26,11 +20,9 @@ use rabble::{
     NodeId,
     Envelope,
     Msg,
-    Req,
     MsgpackSerializer,
     Serialize,
-    Node,
-    CorrelationId
+    Node
 };
 
 const CLUSTER_SERVER_IP: &'static str = "127.0.0.1:11001";
@@ -68,9 +60,9 @@ fn shutdown(node: Node<RabbleUserMsg>,
 {
     let shutdown_envelope = Envelope {
         to: service_pid,
-        from: test_pid.clone(),
-        msg: Msg::Req(Req::Shutdown),
-        correlation_id: CorrelationId::pid(test_pid)
+        from: test_pid,
+        msg: Msg::Shutdown,
+        correlation_id: None
     };
     service_tx.send(shutdown_envelope).unwrap();
     node.shutdown();
@@ -114,7 +106,7 @@ fn run_client_operations(pids: &Vec<Pid>) {
                             Ok(true));
             sock.set_nonblocking(true).unwrap();
             loop {
-                thread::sleep(time::Duration::milliseconds(10).to_std().unwrap());
+                thread::sleep(time::Duration::from_millis(10));
                 match serializer.read_msg(&mut sock) {
                     Ok(None) => (),
                     Ok(Some(reply)) => {
@@ -150,7 +142,7 @@ fn verify_histories(pids: &Vec<Pid>) {
                                                   Some(&ApiClientMsg::GetHistory(pid))),
                                                   Ok(true));
             loop {
-                thread::sleep(time::Duration::milliseconds(10).to_std().unwrap());
+                thread::sleep(time::Duration::from_millis(10));
                 match serializer.read_msg(&mut sock) {
                     Ok(None) => (),
                     Ok(Some(ApiClientMsg::History(h))) => {

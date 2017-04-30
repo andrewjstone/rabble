@@ -5,13 +5,13 @@ extern crate rabble;
 extern crate assert_matches;
 extern crate rustc_serialize;
 
+#[macro_use]
 extern crate slog;
 extern crate slog_stdlog;
 extern crate slog_envlogger;
 extern crate slog_term;
 extern crate log;
 extern crate time;
-extern crate protobuf;
 
 mod utils;
 
@@ -28,17 +28,14 @@ use utils::{
     start_nodes,
     send,
     test_pid,
-    cluster_server_pid,
-    register_test_as_service,
-    connections_stable,
+    register_test_as_service
 };
 
 use rabble::{
     Pid,
     Envelope,
     Msg,
-    Req,
-    Rpy,
+    ClusterStatus,
     MsgpackSerializer,
     Serialize,
     Node,
@@ -174,13 +171,7 @@ fn shutdown(nodes: Vec<CrNode>,
             service_pid: Pid,
             service_tx: CrSender)
 {
-    let test_pid = test_pid(nodes[0].id.clone());
-    let envelope = Envelope {
-        to: service_pid,
-        from: test_pid.clone(),
-        msg: Msg::Req(Req::Shutdown),
-        correlation_id: CorrelationId::pid(test_pid)
-    };
+    let envelope = Envelope::new(service_pid, test_pid(nodes[0].id.clone()), Msg::Shutdown, None);
     service_tx.send(envelope).unwrap();
     for node in nodes {
         node.shutdown();
@@ -195,18 +186,18 @@ fn wait_for_connected_cluster(nodes: &Vec<CrNode>,
     while stable_count < nodes.len() {
         stable_count = 0;
         for node in nodes {
-            node.send(Envelope {
-                to: cluster_server_pid(node.id.clone()),
-                from: test_pid(node.id.clone()),
-                msg: Msg::Req(Req::GetMetrics),
-                correlation_id: CorrelationId::pid(test_pid(node.id.clone()))
-            }).unwrap();
+            let correlation_id = CorrelationId::pid(test_pid(node.id.clone()));
+            node.cluster_status(correlation_id).unwrap();
             // We are only polling on the test channel, so we don't need to know what woke the poller
             let notifications = poller.wait(5000).unwrap();
             assert_eq!(1, notifications.len());
             let envelope = test_rx.try_recv().unwrap();
-            if let Msg::Rpy(Rpy::Metrics(metrics)) = envelope.msg {
-                if connections_stable(2, metrics) {
+            if let Msg::ClusterStatus(ClusterStatus{established,
+                                                    num_connections, ..}) = envelope.msg
+            {
+                // Ensure that we are in a stable state. We have 2 established connections and no
+                // non-established connections that may cause established ones to disconnect.
+                if established.len() == 2  && num_connections == 2 {
                     println!("Cluster connected in {} ms at {}",
                              (SteadyTime::now() - start).num_milliseconds(), node.id);
                     stable_count +=1 ;

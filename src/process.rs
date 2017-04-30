@@ -1,16 +1,22 @@
+use std::fmt::Debug;
+use rustc_serialize::{Encodable, Decodable};
 use pid::Pid;
 use msg::Msg;
-use correlation_id::CorrelationId;
 use envelope::Envelope;
-use user_msg::UserMsg;
+use correlation_id::CorrelationId;
 
-pub trait Process<T: UserMsg> : Send {
+pub trait Process : Send {
+    type Msg: Encodable + Decodable + Debug + Clone;
 
     /// Initialize process state if necessary
-    fn init(&mut self, _executor_pid: Pid) -> Vec<Envelope<T>> {
+    fn init(&mut self, _executor_pid: Pid) -> Vec<Envelope<Self::Msg>> {
         Vec::new()
     }
 
     /// Handle messages from other actors
-    fn handle(&mut self, msg: Msg<T>, from: Pid, cid: CorrelationId) -> &mut Vec<Envelope<T>>;
+    fn handle(&mut self,
+              msg: Msg<Self::Msg>,
+              from: Pid,
+              correlation_id: Option<CorrelationId>)
+        -> &mut Vec<Envelope<Self::Msg>>;
 }

@@ -1,17 +1,18 @@
+use std::fmt::Debug;
 use amy::{self, Poller, Registrar};
 use pid::Pid;
-use msg::{Msg, Req};
+use rustc_serialize::{Encodable, Decodable};
+use msg::Msg;
 use envelope::Envelope;
 use node::Node;
 use errors::*;
 use slog;
-use user_msg::UserMsg;
 use super::ServiceHandler;
 
 /// A system service that operates on a single thread. A service is registered via its pid
 /// with the executor and can send and receive messages to processes as well as other services.
 pub struct Service<T, H>
-    where T: UserMsg,
+    where T: Encodable + Decodable + Debug + Clone,
           H: ServiceHandler<T>
 {
     pub pid: Pid,
@@ -25,7 +26,7 @@ pub struct Service<T, H>
 }
 
 impl<T, H> Service<T, H>
-    where T: UserMsg,
+    where T: Encodable + Decodable + Debug + Clone,
           H: ServiceHandler<T>
 {
     pub fn new(pid: Pid, node: Node<T>, mut handler: H) -> Result<Service<T, H>> {
@@ -77,7 +78,7 @@ impl<T, H> Service<T, H>
 
     pub fn handle_envelopes(&mut self) -> Result<()> {
         while let Ok(envelope) = self.rx.try_recv() {
-            if let Msg::Req(Req::Shutdown) = envelope.msg {
+            if let Msg::Shutdown = envelope.msg {
                 return Err(ErrorKind::Shutdown(self.pid.clone()).into());
             }
             try!(self.handler.handle_envelope(&self.node, envelope, &self.registrar));

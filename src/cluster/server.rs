@@ -1,25 +1,25 @@
 use std::sync::mpsc::{self, Sender, Receiver};
 use std::collections::{HashMap, HashSet};
 use std::net::{TcpListener, TcpStream};
-use std::convert::{Into, TryInto};
+use std::fmt::Debug;
 use libc::EINPROGRESS;
 use net2::{TcpBuilder, TcpStreamExt};
+use rustc_serialize::{Encodable, Decodable};
+use msgpack::{Encoder, Decoder};
 use slog;
 use amy::{Registrar, Notification, Event, Timer, FrameReader, FrameWriter};
 use members::Members;
 use node_id::NodeId;
-use msg::{Msg, Req, Rpy};
+use msg::Msg;
 use executor::ExecutorMsg;
 use timer_wheel::TimerWheel;
 use envelope::Envelope;
 use orset::{ORSet, Delta};
 use pid::Pid;
+use correlation_id::CorrelationId;
 use errors::*;
 use metrics::Metrics;
-use protobuf::{parse_from_bytes, Message};
-use user_msg::UserMsg;
-use pb_messages;
-use super::{ClusterMsg, ExternalMsg, ClusterMetrics};
+use super::{ClusterStatus, ClusterMsg, ExternalMsg, ClusterMetrics};
 
 // TODO: This is totally arbitrary right now and should probably be user configurable
 const MAX_FRAME_SIZE: u32 = 100*1024*1024; // 100 MB
@@ -55,7 +55,7 @@ impl Conn {
 
 /// A struct that handles cluster membership connection and routing of messages to processes on
 /// other nodes.
-pub struct ClusterServer<T: UserMsg> {
+pub struct ClusterServer<T: Encodable + Decodable + Debug + Clone> {
     pid: Pid,
     node: NodeId,
     rx: Receiver<ClusterMsg<T>>,
@@ -73,7 +73,7 @@ pub struct ClusterServer<T: UserMsg> {
     metrics: ClusterMetrics
 }
 
-impl<T: UserMsg> ClusterServer<T> {
+impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
     pub fn new(node: NodeId,
                rx: Receiver<ClusterMsg<T>>,
                executor_tx: Sender<ExecutorMsg<T>>,
@@ -152,22 +152,51 @@ impl<T: UserMsg> ClusterServer<T> {
             },
             ClusterMsg::Envelope(envelope) => {
                 self.metrics.received_local_envelopes += 1;
+                // Only metric requests are directly sent to the cluster server
                 if envelope.to == self.pid {
-                    self.handle_envelope(envelope);
+                    self.send_metrics(envelope);
                     return Ok(());
                 }
                 self.send_remote(envelope)
+            },
+            ClusterMsg::GetStatus(correlation_id) => {
+                self.metrics.status_requests += 1;
+                self.get_status(correlation_id)
             },
             ClusterMsg::Shutdown => Err(ErrorKind::Shutdown(self.pid.clone()).into())
         }
     }
 
+    fn get_status(&self, correlation_id: CorrelationId) -> Result<()> {
+        let status = ClusterStatus {
+            members: self.members.all(),
+            established: self.established.keys().cloned().collect(),
+            num_connections: self.connections.len()
+        };
+        let envelope = Envelope {
+            to: correlation_id.pid.clone(),
+            from: self.pid.clone(),
+            msg: Msg::ClusterStatus(status),
+            correlation_id: Some(correlation_id)
+        };
+        // Route the response through the executor since it knows how to contact all Pids
+        if let Err(mpsc::SendError(ExecutorMsg::Envelope(envelope))) =
+            self.executor_tx.send(ExecutorMsg::Envelope(envelope))
+        {
+            return Err(ErrorKind::SendError("ExecutorMsg::Envelope".to_string(),
+                                            Some(envelope.to)).into());
+        }
+        Ok(())
+    }
+
     fn send_remote(&mut self, envelope: Envelope<T>) -> Result<()> {
         if let Some(id) = self.established.get(&envelope.to.node).cloned() {
             trace!(self.logger, "send remote"; "to" => envelope.to.to_string());
-            let msg: pb_messages::ClusterServerMsg = ExternalMsg::Envelope(envelope).try_into()?;
-            let encoded = msg.write_to_bytes()?;
-            self.write(id, Some(encoded))?;
+            let mut encoded = Vec::new();
+            let node = envelope.to.node.clone();
+            try!(ExternalMsg::Envelope(envelope).encode(&mut Encoder::new(&mut encoded))
+                .chain_err(|| ErrorKind::EncodeError(Some(id), Some(node))));
+            try!(self.write(id, Some(encoded)));
         }
         Ok(())
     }
@@ -342,8 +371,10 @@ impl<T: UserMsg> ClusterServer<T> {
                  .chain_err(|| ErrorKind::ReadError(id, node.clone())));
 
             for frame in conn.reader.iter_mut() {
-                let msg: pb_messages::ClusterServerMsg = parse_from_bytes(&frame[..])?;
-                output.push(msg.try_into()?);
+                let mut decoder = Decoder::new(&frame[..]);
+                let msg = try!(Decodable::decode(&mut decoder)
+                               .chain_err(|| ErrorKind::DecodeError(id, node.clone())));
+                output.push(msg);
             }
         }
         Ok(output)
@@ -401,7 +432,7 @@ impl<T: UserMsg> ClusterServer<T> {
     }
 
     fn send_members(&mut self, id: usize) -> Result<()> {
-        let encoded = try!(self.encode_members());
+        let encoded = try!(self.encode_members(id));
         let registrar = &self.registrar;
         if let Some(mut conn) = self.connections.get_mut(&id) {
             info!(self.logger, "Send members"; "id" => id);
@@ -429,11 +460,12 @@ impl<T: UserMsg> ClusterServer<T> {
         Ok(())
     }
 
-    fn encode_members(&self) -> Result<Vec<u8>> {
+    fn encode_members(&self, id: usize) -> Result<Vec<u8>> {
         let orset = self.members.get_orset();
+        let mut encoded = Vec::new();
         let msg = ExternalMsg::Members::<T> {from: self.node.clone(), orset: orset};
-        let msg: pb_messages::ClusterServerMsg = msg.try_into()?;
-        let encoded = msg.write_to_bytes()?;
+        try!(msg.encode(&mut Encoder::new(&mut encoded))
+             .chain_err(|| ErrorKind::EncodeError(Some(id), None)));
         Ok(encoded)
     }
 
@@ -467,14 +499,18 @@ impl<T: UserMsg> ClusterServer<T> {
 
     fn broadcast_delta(&mut self, delta: Delta<NodeId>) -> Result<()> {
         debug!(self.logger, "Broadcasting delta"; "delta" => format!("{:?}", delta));
-        let msg: pb_messages::ClusterServerMsg = ExternalMsg::Delta::<T>(delta).try_into()?;
-        let encoded = msg.write_to_bytes()?;
+        let mut encoded = Vec::new();
+        let msg = ExternalMsg::Delta::<T>(delta);
+        try!(msg.encode(&mut Encoder::new(&mut encoded))
+             .chain_err(|| ErrorKind::EncodeError(None, None)));
         self.broadcast(encoded)
     }
 
     fn broadcast_pings(&mut self) -> Result<()> {
-        let msg: pb_messages::ClusterServerMsg = ExternalMsg::Ping::<T>.try_into()?;
-        let encoded = msg.write_to_bytes()?;
+        let mut encoded = Vec::new();
+        let msg = ExternalMsg::Ping::<T>;
+        try!(msg.encode(&mut Encoder::new(&mut encoded))
+             .chain_err(|| ErrorKind::EncodeError(None, None)));
         self.broadcast(encoded)
     }
 
@@ -555,40 +591,24 @@ impl<T: UserMsg> ClusterServer<T> {
         }
     }
 
-    fn handle_envelope(&mut self, envelope: Envelope<T>) {
-        let msg = match envelope.msg {
-            Msg::Req(Req::GetMetrics) => {
-                self.metrics.connections = self.connections.len() as i64;
-                self.metrics.established_connections = self.established.len() as i64;
-                Msg::Rpy(Rpy::Metrics(self.metrics.data()))
-            },
-            Msg::Req(Req::GetMembership) => {
-                let members = self.members.all().into_iter().map(|node_id| {
-                    let connected = self.established.contains_key(&node_id);
-                    (node_id, connected)
-                }).collect();
-                Msg::Rpy(Rpy::Members(members))
-            },
-            _ => {
-                error!(self.logger, "Received Unknown Msg";
-                       "envelope" => format!("{:?}", envelope));
-                Msg::Rpy(Rpy::Error(format!("Cluster server received unknown message: {:?}",
-                                            envelope)))
-
+    fn send_metrics(&mut self, envelope: Envelope<T>) {
+        if let Msg::GetMetrics = envelope.msg {
+            let new_envelope = Envelope {
+                to: envelope.from,
+                from: self.pid.clone(),
+                msg: Msg::Metrics(self.metrics.data()),
+                correlation_id: envelope.correlation_id
+            };
+            // Route the response through the executor since it knows how to contact all Pids
+            if let Err(mpsc::SendError(ExecutorMsg::Envelope(new_envelope))) =
+                self.executor_tx.send(ExecutorMsg::Envelope(new_envelope))
+            {
+                error!(self.logger, "Failed to send to executor";
+                    "envelope" => format!("{:?}", new_envelope));
             }
-        };
-        let rpy_envelope = Envelope {
-            to: envelope.from,
-            from: self.pid.clone(),
-            msg: msg,
-            correlation_id: envelope.correlation_id
-        };
-        // Route the response through the executor since it knows how to contact all Pids
-        if let Err(mpsc::SendError(ExecutorMsg::Envelope(rpy_envelope))) =
-            self.executor_tx.send(ExecutorMsg::Envelope(rpy_envelope))
-        {
-            error!(self.logger, "Failed to send to executor";
-                   "envelope" => format!("{:?}", rpy_envelope));
+        } else {
+            error!(self.logger, "Received Unknown Msg";
+                   "envelope" => format!("{:?}", envelope));
         }
     }
 }

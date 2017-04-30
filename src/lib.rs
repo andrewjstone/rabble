@@ -1,5 +1,4 @@
 #![recursion_limit = "1024"]
-#![feature(try_from)]
 
 #[macro_use]
 extern crate error_chain;
@@ -19,13 +18,6 @@ extern crate ferris;
 extern crate slog;
 extern crate slog_stdlog;
 
-// allow(deprecated) used to fix this warning in generated code:
-// .../src/../schema/pb_messages.rs:400:29
-// fields.push(::protobuf::reflect::accessor::make_repeated_message_accessor(...
-#[path = "../schema/pb_messages.rs"]
-#[allow(deprecated)]
-mod pb_messages;
-
 #[macro_use]
 mod metrics;
 
@@ -42,7 +34,6 @@ mod timer_wheel;
 mod service;
 mod correlation_id;
 mod serialize;
-mod user_msg;
 
 pub mod errors;
 
@@ -53,27 +44,17 @@ pub use pid::Pid;
 pub use process::Process;
 pub use envelope::Envelope;
 pub use correlation_id::CorrelationId;
-pub use user_msg::UserMsg;
-
-pub use errors::{
-    ErrorKind,
-    Error
-};
-
-pub use msg::{
-    Msg,
-    Req,
-    Rpy
-};
-
+pub use msg::Msg;
 pub use metrics::Metric;
 
 pub use cluster::{
-    ClusterServer
+    ClusterServer,
+    ClusterStatus,
 };
 
 pub use executor::{
     Executor,
+    ExecutorStatus,
     ExecutorMetrics
 };
 
@@ -82,7 +63,8 @@ pub use service::{
     ConnectionHandler,
     ConnectionMsg,
     ServiceHandler,
-    TcpServerHandler
+    TcpServerHandler,
+    ThreadHandler
 };
 
 pub use serialize::{
@@ -93,6 +75,8 @@ pub use serialize::{
 
 use std::thread::{self, JoinHandle};
 use std::sync::mpsc::channel;
+use std::fmt::Debug;
+use rustc_serialize::{Encodable, Decodable};
 use amy::Poller;
 use slog::DrainExt;
 use cluster::ClusterMsg;
@@ -104,7 +88,7 @@ const TIMEOUT: usize = 5000; // ms
 ///
 /// All nodes in a cluster must be parameterized by the same type.
 pub fn rouse<T>(node_id: NodeId, logger: Option<slog::Logger>) -> (Node<T>, Vec<JoinHandle<()>>)
-  where T: UserMsg + 'static
+  where T: Encodable + Decodable + Send + 'static + Clone + Debug,
 {
     let logger = match logger {
         Some(logger) => logger.new(o!("node_id" => node_id.to_string())),
