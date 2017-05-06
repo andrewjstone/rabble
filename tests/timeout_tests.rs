@@ -62,7 +62,6 @@ fn connection_timeout() {
 struct TestProcess {
     pid: Pid,
     executor_pid: Option<Pid>,
-    output: Vec<Envelope<()>>,
 
     /// Don't do this in production!!!
     /// This is only hear to signal to the test that it has received a message.
@@ -85,13 +84,13 @@ impl Process for TestProcess {
     fn handle(&mut self,
               msg: Msg<()>,
               from: Pid,
-              correlation_id: Option<CorrelationId>) -> &mut Vec<Envelope<()>>
+              correlation_id: Option<CorrelationId>,
+              _: &mut Vec<Envelope<()>>)
     {
         assert_eq!(from, *self.executor_pid.as_ref().unwrap());
         assert_eq!(msg, Msg::Timeout);
         assert_eq!(correlation_id, None);
         self.tx.send(()).unwrap();
-        &mut self.output
     }
 }
 
@@ -111,7 +110,6 @@ fn process_timeout() {
     let process = TestProcess {
         pid: pid.clone(),
         executor_pid: None,
-        output: Vec::new(),
         tx: tx
     };
 

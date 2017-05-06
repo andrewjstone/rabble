@@ -150,8 +150,10 @@ impl Process for Counter {
     type Msg = CounterMsg;
 
     // Each process must implement a single method, `handle`.
-    fn handle(&mut self, msg: Msg<CounterMsg>, from: Pid, correlation_id: Option<CorrelationId>)
-        -> &mut Vec<Envelope<CounterMsg>>
+    fn handle(&mut self, msg: Msg<CounterMsg>,
+              from: Pid,
+              correlation_id: Option<CorrelationId>,
+              output: &mut Vec<Envelope<CounterMsg>>)
     {
         match msg {
           Msg::User(CounterMsg::Inc) => {
@@ -163,20 +165,20 @@ impl Process for Counter {
                   for &b in self.backups {
                       let msg = Msg::User(CounterMsg::Inc);
                       let envelope = Envelope::new(b.clone(), self.pid.clone(), msg, correlation_id);
-                      self.output.push(envelope);
+                      output.push(envelope);
                   }
               } else {
                   // Respond to the primary
                   let reply = Msg::User(CounterMsg::Ok);
                   let envelope = Envelope::new(from, self.pid.clone(), reply, correlation_id);
-                  self.output.push(envelope);
+                  output.push(envelope);
               }
           },
           Msg::User(CounterMsg::GetCount) => {
               // Only the primary gets this message
               let reply = Msg::User(CounterMsg::Count(self.count));
               let envelope = Envelope::new(from, self.pid.clone(), reply, correlation_id);
-              self.output.push(envelope);
+              output.push(envelope);
           },
           Msg::User(CounterMsg::Ok) => {
               // Increment the backup_replies. Once we have received both, reply to the client
@@ -194,12 +196,11 @@ impl Process for Counter {
                   let to = correlation_id.as_ref().unwrap().pid.clone();
                   let reply = CounterMsg::Ok;
                   let envelope = Envelope::new(to, self.pid.clone(), reply, correlation_id);
-                  self.output.push(envelope);
+                  output.push(envelope);
               }
           },
           _ => unreachable!()
         }
-        &mut self.output
     }
 }
 ```
@@ -433,12 +434,12 @@ impl Process for TestProcess {
     fn handle(&mut self,
               msg: Msg<()>,
               from: Pid,
-              correlation_id: Option<CorrelationId>) -> &mut Vec<Envelope<()>>
+              correlation_id: Option<CorrelationId>,
+              output: &mut Vec<Envelope<()>>)
     {
       assert_eq!(from, *self.executor_pid.as_ref().unwrap());
       assert_eq!(msg, Msg::Timeout);
       assert_eq!(correlation_id, None);
-      &mut self.output
     }
 }
 ```

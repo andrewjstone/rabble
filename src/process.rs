@@ -17,6 +17,6 @@ pub trait Process : Send {
     fn handle(&mut self,
               msg: Msg<Self::Msg>,
               from: Pid,
-              correlation_id: Option<CorrelationId>)
-        -> &mut Vec<Envelope<Self::Msg>>;
+              correlation_id: Option<CorrelationId>,
+              output: &mut Vec<Envelope<Self::Msg>>);
 }

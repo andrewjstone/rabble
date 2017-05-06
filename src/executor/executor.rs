@@ -1,4 +1,5 @@
 use rustc_serialize::{Encodable, Decodable};
+use std::mem;
 use std::fmt::Debug;
 use std::sync::mpsc::{Sender, Receiver};
 use std::collections::HashMap;
@@ -19,6 +20,7 @@ use super::{ExecutorStatus, ExecutorMetrics, ExecutorMsg};
 pub struct Executor<T: Encodable + Decodable + Send + Debug + Clone> {
     pid: Pid,
     node: NodeId,
+    envelopes: Vec<Envelope<T>>,
     processes: HashMap<Pid, Box<Process<Msg=T>>>,
     service_senders: HashMap<Pid, amy::Sender<Envelope<T>>>,
     tx: Sender<ExecutorMsg<T>>,
@@ -43,6 +45,7 @@ impl<T: Encodable + Decodable + Send + Debug + Clone> Executor<T> {
         Executor {
             pid: pid,
             node: node,
+            envelopes: Vec::new(),
             processes: HashMap::new(),
             service_senders: HashMap::new(),
             tx: tx,
@@ -148,14 +151,16 @@ impl<T: Encodable + Decodable + Send + Debug + Clone> Executor<T> {
             return Ok(());
         }
 
-        let envelopes: Vec<_> = if let Some(process) = self.processes.get_mut(&envelope.to) {
+        if let Some(process) = self.processes.get_mut(&envelope.to) {
             let Envelope {from, msg, correlation_id, ..} = envelope;
-            process.handle(msg, from, correlation_id).drain(..).collect()
+            process.handle(msg, from, correlation_id, &mut self.envelopes);
         } else {
             return Err(envelope);
         };
 
-        for envelope in envelopes {
+        // Take envelopes out of self temporarily so we don't get a borrowck error
+        let mut envelopes = mem::replace(&mut self.envelopes, Vec::new());
+        for envelope in envelopes.drain(..) {
             if envelope.to == self.pid {
                 self.handle_executor_envelope(envelope);
                 continue;
@@ -167,6 +172,8 @@ impl<T: Encodable + Decodable + Send + Debug + Clone> Executor<T> {
                 self.cluster_tx.send(ClusterMsg::Envelope(envelope)).unwrap();
             }
         }
+        // Return the allocated vec back to self
+        let _ = mem::replace(&mut self.envelopes, envelopes);
         Ok(())
     }
 

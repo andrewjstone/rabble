@@ -13,8 +13,7 @@ use super::messages::RabbleUserMsg;
 pub struct Replica {
     pid: Pid,
     next: Option<Pid>,
-    history: Vec<usize>,
-    output: Vec<Envelope<RabbleUserMsg>>
+    history: Vec<usize>
 }
 
 #[allow(dead_code)] // Not used in all tests
@@ -23,8 +22,7 @@ impl Replica {
         Replica {
             pid: pid,
             next: next,
-            history: Vec::new(),
-            output: Vec::with_capacity(1)
+            history: Vec::new()
         }
     }
 }
@@ -35,8 +33,8 @@ impl Process for Replica {
     fn handle(&mut self,
               msg: Msg<RabbleUserMsg>,
               _from: Pid,
-              correlation_id: Option<CorrelationId>)
-        -> &mut Vec<Envelope<RabbleUserMsg>>
+              correlation_id: Option<CorrelationId>,
+              output: &mut Vec<Envelope<RabbleUserMsg>>)
     {
         let to = correlation_id.as_ref().unwrap().pid.clone();
         let from = self.pid.clone();
@@ -54,16 +52,15 @@ impl Process for Replica {
                 });
 
                 self.history.push(val);
-                self.output.push(envelope);
+                output.push(envelope);
             },
             Msg::User(RabbleUserMsg::GetHistory) => {
                 let msg = Msg::User(RabbleUserMsg::History(self.history.clone()));
                 let envelope = Envelope::new(to, from, msg, correlation_id);
-                self.output.push(envelope);
+                output.push(envelope);
             },
             _ => ()
         }
-        &mut self.output
     }
 }
 

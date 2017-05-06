@@ -60,8 +60,11 @@ enum, which is the single type shared among actors as described above.
 ```Rust
 pub trait Process : Send {
   type Msg: Encodable + Decodable + Debug + Clone;
-  fn handle(&mut self, msg: Msg<Self::Msg>, from: Pid, correlation_id: Option<CorrelationId>)
-    -> &mut Vec<Envelope<Self::Msg>>;
+  fn handle(&mut self,
+            msg: Msg<Self::Msg>,
+            from: Pid, correlation_id:
+            Option<CorrelationId>,
+            output: Vec<Envelope<Self::Msg>>);
 }
 ```
 
@@ -69,37 +72,26 @@ Processes contain an internal state that can be mutated when a message is handle
 only responed to messages, and do not generate output without input. Any output messages to actors
 in response to the input message are not sent directly over channels but are instead packaged into
 [envelopes](https://github.com/andrewjstone/rabble/blob/e1474eda584f3c278322ce21d33d56e6e30f639f/src/envelope.rs) and
-pushed onto an output Vec. A mutable reference to this output Vec is returned to the caller.
+pushed onto an output Vec.
 
-The choice to return a mutable Vec of envelopes is an interesting one, so a short discussion of why
-this was chosen is in order. A key goal of rabble is to enable easy testability of indivdiual
-processes and protocols involving those processes. While other actor systems allow processes to
-directly send messages while running a callback, this side-effect behavior is very hard to test. In
-a traditional actor language like Erlang, these side-effects manifest as non-determinism in the
-ordering of messages due to scheduling behavior of the processes. Re-running a failing test often
-results in a different messaging order making the failure hard to reproduce and the root cause hard
-to discover. By making the interface to each process a function call that only modifies internal
-state and returns envelopes, we can carefully control the ordering of all messages between processes
-by a test and can even allow dropping, delaying or re-ordering of those messages in ways specific to
-the test itself.  This allows for full determinism specified by the test, and allows building
-interactive debuggers that can literally step through the messages sent in a system. Note that while
-the order of test messages is deterministic and tests are repeatable, covering the entire state
-space is still just as hard as in traditional actor systems. Therefore, long-running simulations of
-multiple schedules in a [quickcheck](https://github.com/BurntSushi/quickcheck) like manner, or
-exhaustive [model checking](https://en.wikipedia.org/wiki/Model_checking) with or without [partial
-order reduction](https://en.wikipedia.org/wiki/Partial_order_reduction) of state space is
+The choice to return envelopes inside a mutable Vec of envelopes is an interesting one, so a short
+discussion of why this was chosen is in order. A key goal of rabble is to enable easy testability of
+indivdiual processes and protocols involving those processes. While other actor systems allow
+processes to directly send messages while running a callback, this side-effect behavior is very hard
+to test. In a traditional actor language like Erlang, these side-effects manifest as non-determinism
+in the ordering of messages due to scheduling behavior of the processes. Re-running a failing test
+often results in a different messaging order making the failure hard to reproduce and the root cause
+hard to discover. By making the interface to each process a function call that only modifies
+internal state and returns envelopes, we can carefully control the ordering of all messages between
+processes by a test and can even allow dropping, delaying or re-ordering of those messages in ways
+specific to the test itself.  This allows for full determinism specified by the test, and allows
+building interactive debuggers that can literally step through the messages sent in a system. Note
+that while the order of test messages is deterministic and tests are repeatable, covering the entire
+state space is still just as hard as in traditional actor systems. Therefore, long-running
+simulations of multiple schedules in a [quickcheck](https://github.com/BurntSushi/quickcheck) like
+manner, or exhaustive [model checking](https://en.wikipedia.org/wiki/Model_checking) with or without
+[partial order reduction](https://en.wikipedia.org/wiki/Partial_order_reduction) of state space is
 recommended.
-
-OK, now it should be clear why rabble processes return envelopes instead of sending them directly, but why
-do they return a reference to a mutable Vec owned by the process? The rationale is twofold:
-
- 1. If a new Vec was returned, this would result in an allocation on every message receipt.
- 2. The process best knows how many messages it is going to return at a maximum. It can therefore
-    allocate a Vec once at start up with
-    [Vec::with_capacity()](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.with_capacity)
-    and then never need re-sizing. The `handle` caller then just uses the
-    [Drain](https://doc.rust-lang.org/std/vec/struct.Vec.html#method.drain) method to remove the
-    elements from the Vec without deallocating the space in the Vec.
 
 ### Executor
 Each process receives a messages sent to it when its `handle` method gets called, and returns any
