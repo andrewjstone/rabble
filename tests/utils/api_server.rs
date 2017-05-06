@@ -45,8 +45,7 @@ pub fn start(node: Node<RabbleUserMsg>)
 pub struct ApiServerConnectionHandler {
     pid: Pid,
     id: u64,
-    total_requests: u64,
-    output: Vec<ConnectionMsg<ApiServerConnectionHandler>>
+    total_requests: u64
 }
 
 impl ConnectionHandler for ApiServerConnectionHandler {
@@ -57,56 +56,56 @@ impl ConnectionHandler for ApiServerConnectionHandler {
         ApiServerConnectionHandler {
             pid: pid,
             id: id,
-            total_requests: 0,
-            output: Vec::with_capacity(1)
+            total_requests: 0
         }
     }
 
-    fn handle_envelope(&mut self, envelope: Envelope<RabbleUserMsg>)
-        -> &mut Vec<ConnectionMsg<ApiServerConnectionHandler>>
+    fn handle_envelope(&mut self,
+                       envelope: Envelope<RabbleUserMsg>,
+                       output: &mut Vec<ConnectionMsg<ApiServerConnectionHandler>>)
     {
         let Envelope {msg, correlation_id, ..} = envelope;
         let correlation_id = correlation_id.unwrap();
         match msg {
             Msg::User(RabbleUserMsg::History(h)) => {
-                self.output.push(ConnectionMsg::Client(ApiClientMsg::History(h), correlation_id));
+                output.push(ConnectionMsg::Client(ApiClientMsg::History(h), correlation_id));
             },
             Msg::User(RabbleUserMsg::OpComplete) => {
-                self.output.push(ConnectionMsg::Client(ApiClientMsg::OpComplete, correlation_id));
+                output.push(ConnectionMsg::Client(ApiClientMsg::OpComplete, correlation_id));
             },
             Msg::Timeout => {
-                self.output.push(ConnectionMsg::Client(ApiClientMsg::Timeout, correlation_id));
+                output.push(ConnectionMsg::Client(ApiClientMsg::Timeout, correlation_id));
             },
             _ => unreachable!()
         }
-        &mut self.output
     }
 
-    fn handle_network_msg(&mut self, msg: ApiClientMsg)
-        -> &mut Vec<ConnectionMsg<ApiServerConnectionHandler>>
+    fn handle_network_msg(&mut self,
+                          msg: ApiClientMsg,
+                          output: &mut Vec<ConnectionMsg<ApiServerConnectionHandler>>)
     {
         match msg {
             ApiClientMsg::Op(pid, val) => {
-                self.push_new_envelope(pid, RabbleUserMsg::Op(val));
+                output.push(self.new_envelope(pid, RabbleUserMsg::Op(val)));
             },
             ApiClientMsg::GetHistory(pid) => {
-                self.push_new_envelope(pid, RabbleUserMsg::GetHistory);
+                output.push(self.new_envelope(pid, RabbleUserMsg::GetHistory));
             }
 
             // We only handle client requests. Client replies come in as Envelopes and are handled
             // in handle_envelope().
             _ => unreachable!()
         }
-        &mut self.output
     }
 }
 
 impl ApiServerConnectionHandler {
-    pub fn push_new_envelope(&mut self, to: Pid, user_msg: RabbleUserMsg) {
+    pub fn new_envelope(&mut self, to: Pid, user_msg: RabbleUserMsg)
+        -> ConnectionMsg<ApiServerConnectionHandler>
+    {
         let msg = Msg::User(user_msg);
         let correlation_id = CorrelationId::request(self.pid.clone(), self.id, self.total_requests);
         self.total_requests += 1;
-        let envelope = Envelope::new(to, self.pid.clone(), msg, Some(correlation_id));
-        self.output.push(ConnectionMsg::Envelope(envelope));
+        ConnectionMsg::Envelope(Envelope::new(to, self.pid.clone(), msg, Some(correlation_id)))
     }
 }

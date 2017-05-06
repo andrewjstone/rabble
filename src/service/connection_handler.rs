@@ -10,8 +10,8 @@ pub trait ConnectionHandler : Sized {
     type ClientMsg: Debug;
 
     fn new(pid: Pid, id: u64) -> Self;
-    fn handle_envelope(&mut self, Envelope<Self::Msg>) -> &mut Vec<ConnectionMsg<Self>>;
-    fn handle_network_msg(&mut self, Self::ClientMsg) -> &mut Vec<ConnectionMsg<Self>>;
+    fn handle_envelope(&mut self, Envelope<Self::Msg>, &mut Vec<ConnectionMsg<Self>>);
+    fn handle_network_msg(&mut self, Self::ClientMsg, &mut Vec<ConnectionMsg<Self>>);
 }
 
 /// Connection messages are returned from the callback functions for a Connection.

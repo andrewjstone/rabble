@@ -150,8 +150,10 @@ impl Process for Counter {
     type Msg = CounterMsg;
 
     // Each process must implement a single method, `handle`.
-    fn handle(&mut self, msg: Msg<CounterMsg>, from: Pid, correlation_id: Option<CorrelationId>)
-        -> &mut Vec<Envelope<CounterMsg>>
+    fn handle(&mut self, msg: Msg<CounterMsg>,
+              from: Pid,
+              correlation_id: Option<CorrelationId>,
+              output: &mut Vec<Envelope<CounterMsg>>)
     {
         match msg {
           Msg::User(CounterMsg::Inc) => {
@@ -163,20 +165,20 @@ impl Process for Counter {
                   for &b in self.backups {
                       let msg = Msg::User(CounterMsg::Inc);
                       let envelope = Envelope::new(b.clone(), self.pid.clone(), msg, correlation_id);
-                      self.output.push(envelope);
+                      output.push(envelope);
                   }
               } else {
                   // Respond to the primary
                   let reply = Msg::User(CounterMsg::Ok);
                   let envelope = Envelope::new(from, self.pid.clone(), reply, correlation_id);
-                  self.output.push(envelope);
+                  output.push(envelope);
               }
           },
           Msg::User(CounterMsg::GetCount) => {
               // Only the primary gets this message
               let reply = Msg::User(CounterMsg::Count(self.count));
               let envelope = Envelope::new(from, self.pid.clone(), reply, correlation_id);
-              self.output.push(envelope);
+              output.push(envelope);
           },
           Msg::User(CounterMsg::Ok) => {
               // Increment the backup_replies. Once we have received both, reply to the client
@@ -194,12 +196,11 @@ impl Process for Counter {
                   let to = correlation_id.as_ref().unwrap().pid.clone();
                   let reply = CounterMsg::Ok;
                   let envelope = Envelope::new(to, self.pid.clone(), reply, correlation_id);
-                  self.output.push(envelope);
+                  output.push(envelope);
               }
           },
           _ => unreachable!()
         }
-        &mut self.output
     }
 }
 ```
@@ -305,8 +306,7 @@ pub struct ApiServerConnectionHandler {
     pid: Pid,
     counter_pid: Pid,
     id: usize,
-    total_requests: usize,
-    output: Vec<ConnectionMsg<ApiServerConnectionHandler>>
+    total_requests: usize
 }
 
 impl ConnectionHandler for ApiServerConnectionHandler {
@@ -324,13 +324,13 @@ impl ConnectionHandler for ApiServerConnectionHandler {
             pid: pid,
             counter_pid: counter_pid,
             id: id,
-            total_requests: 0,
-            output: Vec::with_capacity(1)
+            total_requests: 0
         }
     }
 
-    fn handle_envelope(&mut self, envelope: Envelope<CounterMsg>)
-        -> &mut Vec<ConnectionMsg<ApiServerConnectionHandler>>
+    fn handle_envelope(&mut self,
+                       envelope: Envelope<CounterMsg>
+                       output: &mut Vec<ConnectionMsg<ApiServerConnectionHandler>>)
     {
         let Envelope {msg, correlation_id, ..} = envelope;
         // Envelopes destined for a connection handler must have a correlation id
@@ -338,7 +338,7 @@ impl ConnectionHandler for ApiServerConnectionHandler {
 
         match msg {
             Msg::User(counter_msg) =>
-              self.output.push(ConnectionMsg::ClientMsg(counter_msg, correlation_id));
+              output.push(ConnectionMsg::ClientMsg(counter_msg, correlation_id));
 
             // Requests can timeout as well. Our client message should contain a Timeout variant.
             Msg::Timeout => ...,
@@ -347,8 +347,9 @@ impl ConnectionHandler for ApiServerConnectionHandler {
         }
     }
 
-    fn handle_network_msg(&mut self, msg: CounterMsg)
-        -> &mut Vec<ConnectionMsg<ApiServerConnectionHandler>>
+    fn handle_network_msg(&mut self,
+                          msg: CounterMsg,
+                          output: &mut Vec<ConnectionMsg<ApiServerConnectionHandler>>)
     {
         // Our client and actor messages are the same, so just forward to the counter process.
         // Note that in a real system, either the counter Pid would be passed in from the client, known
@@ -358,8 +359,7 @@ impl ConnectionHandler for ApiServerConnectionHandler {
         let correlation_id = CorrelationId::request(self.pid.clone(), self.id, self.total_requests);
         self.total_requests += 1;
         let envelope = Envelope::new(self.counter_pid.clone(), self.pid.clone(), msg, Some(correlation_id));
-        self.output.push(ConnectionMsg::Envelope(envelope));
-        &mut self.output
+        output.push(ConnectionMsg::Envelope(envelope));
     }
 ```
 
@@ -433,12 +433,12 @@ impl Process for TestProcess {
     fn handle(&mut self,
               msg: Msg<()>,
               from: Pid,
-              correlation_id: Option<CorrelationId>) -> &mut Vec<Envelope<()>>
+              correlation_id: Option<CorrelationId>,
+              output: &mut Vec<Envelope<()>>)
     {
       assert_eq!(from, *self.executor_pid.as_ref().unwrap());
       assert_eq!(msg, Msg::Timeout);
       assert_eq!(correlation_id, None);
-      &mut self.output
     }
 }
 ```
