@@ -59,7 +59,9 @@ pub struct TcpServerHandler<C, S>
     connection_timer_wheel: Option<TimerWheel<usize>>,
     request_timeout: usize, // ms
     request_timer_id: usize,
-    request_timer_wheel: TimerWheel<CorrelationId>
+    request_timer_wheel: TimerWheel<CorrelationId>,
+    output: Vec<ConnectionMsg<C>>
+
 }
 
 impl <C,S> TcpServerHandler<C, S>
@@ -95,7 +97,8 @@ impl <C,S> TcpServerHandler<C, S>
             connection_timer_wheel: connection_timer_wheel,
             request_timeout: request_timeout,
             request_timer_id: 0, // Dummy timer id for now. Will be set in init()
-            request_timer_wheel: TimerWheel::new(TIMER_WHEEL_SLOTS + 1)
+            request_timer_wheel: TimerWheel::new(TIMER_WHEEL_SLOTS + 1),
+            output: Vec::new()
         }
     }
 
@@ -141,7 +144,10 @@ impl <C,S> TcpServerHandler<C, S>
             }
 
             if notification.event.readable() {
-                try!(handle_readable(connection, &mut self.request_timer_wheel, node));
+                try!(handle_readable(connection,
+                                     &mut self.request_timer_wheel,
+                                     node,
+                                     &mut self.output));
                 update_connection_timeout(connection, &mut self.connection_timer_wheel);
             }
         }
@@ -168,9 +174,9 @@ impl <C,S> TcpServerHandler<C, S>
                     msg: Msg::Timeout,
                     correlation_id: Some(correlation_id.clone())
                 };
-                let responses = connection.handler.handle_envelope(envelope);
+                connection.handler.handle_envelope(envelope, &mut self.output);
                 try!(handle_connection_msgs(&mut self.request_timer_wheel,
-                                            responses,
+                                            &mut self.output,
                                             &mut connection.serializer,
                                             &mut connection.sock,
                                             node));
@@ -250,9 +256,9 @@ impl<C, S> ServiceHandler<C::Msg> for TcpServerHandler<C, S>
         // the request has already received its reply
         let conn_id = envelope.correlation_id.as_ref().unwrap().connection.as_ref().cloned().unwrap();
         if let Some(mut connection) = self.connections.get_mut(&(conn_id as usize)) {
-            let responses = connection.handler.handle_envelope(envelope);
+            connection.handler.handle_envelope(envelope, &mut self.output);
             try!(handle_connection_msgs(&mut self.request_timer_wheel,
-                                        responses,
+                                        &mut self.output,
                                         &mut connection.serializer,
                                         &mut connection.sock,
                                         node));
@@ -265,14 +271,15 @@ impl<C, S> ServiceHandler<C::Msg> for TcpServerHandler<C, S>
 /// Handle any readable notifications.
 fn handle_readable<C, S>(connection: &mut Connection<C, S>,
                       request_timer_wheel: &mut TimerWheel<CorrelationId>,
-                      node: &Node<C::Msg>) -> Result<()>
+                      node: &Node<C::Msg>,
+                      output: &mut Vec<ConnectionMsg<C>>) -> Result<()>
     where C: ConnectionHandler<ClientMsg=S::Msg>,
           S: Serialize
 {
     while let Some(msg) = try!(connection.serializer.read_msg(&mut connection.sock)) {
-        let responses = connection.handler.handle_network_msg(msg);
+        connection.handler.handle_network_msg(msg, output);
         try!(handle_connection_msgs(request_timer_wheel,
-                                    responses,
+                                    output,
                                     &mut connection.serializer,
                                     &mut connection.sock,
                                     node));
