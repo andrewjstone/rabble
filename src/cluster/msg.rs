@@ -1,5 +1,3 @@
-use std::fmt::Debug;
-use rustc_serialize::{Encodable, Decodable};
 use amy::Notification;
 use orset::{ORSet, Delta};
 use node_id::NodeId;
@@ -7,7 +5,7 @@ use envelope::Envelope;
 use correlation_id::CorrelationId;
 
 /// Messages sent to the Cluster Server
-pub enum ClusterMsg<T: Encodable + Decodable + Debug + Clone> {
+pub enum ClusterMsg<T> {
     PollNotifications(Vec<Notification>),
     Join(NodeId),
     Leave(NodeId),
@@ -18,8 +16,8 @@ pub enum ClusterMsg<T: Encodable + Decodable + Debug + Clone> {
 
 /// A message sent between nodes in Rabble.
 ///
-#[derive(Debug, Clone, RustcEncodable, RustcDecodable)]
-pub enum ExternalMsg<T: Encodable + Decodable + Debug + Clone> {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ExternalMsg<T> {
    Members {from: NodeId, orset: ORSet<NodeId>},
    Ping,
    Envelope(Envelope<T>),

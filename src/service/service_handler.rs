@@ -1,12 +1,10 @@
-use std::fmt::Debug;
-use rustc_serialize::{Encodable, Decodable};
 use amy::{Notification, Registrar};
 use envelope::Envelope;
 use node::Node;
 use errors::*;
 
 /// A service handler
-pub trait ServiceHandler<T: Encodable + Decodable + Debug + Clone> {
+pub trait ServiceHandler<T> {
     /// A callback function used to initialize the handler.
     ///
     /// The handler is expected to register any necessary timeouts or listening sockets with the

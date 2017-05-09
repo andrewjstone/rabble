@@ -4,8 +4,7 @@
 extern crate error_chain;
 
 extern crate orset;
-extern crate rustc_serialize;
-extern crate rmp_serialize as msgpack;
+extern crate rmp_serde as msgpack;
 extern crate protobuf;
 extern crate amy;
 extern crate time;
@@ -17,6 +16,11 @@ extern crate ferris;
 #[macro_use]
 extern crate slog;
 extern crate slog_stdlog;
+
+extern crate serde;
+
+#[macro_use]
+extern crate serde_derive;
 
 #[macro_use]
 mod metrics;
@@ -33,7 +37,7 @@ mod msg;
 mod timer_wheel;
 mod service;
 mod correlation_id;
-mod serialize;
+pub mod serialize;
 
 pub mod errors;
 
@@ -64,19 +68,12 @@ pub use service::{
     ConnectionMsg,
     ServiceHandler,
     TcpServerHandler,
-    ThreadHandler
-};
-
-pub use serialize::{
-    Serialize,
-    MsgpackSerializer,
-    ProtobufSerializer
 };
 
 use std::thread::{self, JoinHandle};
 use std::sync::mpsc::channel;
 use std::fmt::Debug;
-use rustc_serialize::{Encodable, Decodable};
+use serde::{Deserialize, Serialize};
 use amy::Poller;
 use slog::DrainExt;
 use cluster::ClusterMsg;
@@ -87,8 +84,8 @@ const TIMEOUT: usize = 5000; // ms
 /// by rabble.
 ///
 /// All nodes in a cluster must be parameterized by the same type.
-pub fn rouse<T>(node_id: NodeId, logger: Option<slog::Logger>) -> (Node<T>, Vec<JoinHandle<()>>)
-  where T: Encodable + Decodable + Send + 'static + Clone + Debug,
+pub fn rouse<'de, T>(node_id: NodeId, logger: Option<slog::Logger>) -> (Node<T>, Vec<JoinHandle<()>>)
+  where T: Serialize + Deserialize<'de> + Send + 'static + Clone + Debug,
 {
     let logger = match logger {
         Some(logger) => logger.new(o!("node_id" => node_id.to_string())),

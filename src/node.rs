@@ -1,6 +1,6 @@
 use std::sync::mpsc::Sender;
 use std::fmt::Debug;
-use rustc_serialize::{Encodable, Decodable};
+use serde::{Serialize, Deserialize};
 use node_id::NodeId;
 use executor::ExecutorMsg;
 use cluster::ClusterMsg;
@@ -27,14 +27,14 @@ macro_rules! send {
 /// The Node api is used by services and their handlers to send messages, get status, join
 /// nodes into a cluster, etc...
 #[derive(Clone)]
-pub struct Node<T: Encodable + Decodable + Debug + Clone> {
+pub struct Node<T> {
     pub id: NodeId,
     pub logger: slog::Logger,
     executor_tx: Sender<ExecutorMsg<T>>,
     cluster_tx: Sender<ClusterMsg<T>>
 }
 
-impl<T: Encodable + Decodable + Debug + Clone> Node<T> {
+impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> Node<T> {
     /// Create a new node. This function should not be called by the user directly. It is called by
     /// by the user call to `rabble::rouse(..)` that initializes a rabble system for a single node.
     pub fn new(id: NodeId,
@@ -72,7 +72,7 @@ impl<T: Encodable + Decodable + Debug + Clone> Node<T> {
     }
 
     /// Add a process to the executor that can be sent Envelopes addressed to its pid
-    pub fn spawn(&self, pid: &Pid, process: Box<Process<Msg=T>>) -> Result<()> {
+    pub fn spawn(&self, pid: &Pid, process: Box<Process<T>>) -> Result<()> {
         send!(self.executor_tx,
               ExecutorMsg::Start(pid.clone(), process),
               Some(pid),

@@ -51,8 +51,8 @@ A node can then be started with a call to
 use rabble::NodeId;
 
 // The message shipped between actors in the system. It must implement these derived traits.
-// RustcEncodable and RustcDecodable provide serialization capability to arbitrary formats.
-#[derive(Debug, Clone, Eq, PartialEq, RustcEncodable, RustcDecodable)]
+// Serialize and Deserialize provide serialization capability to arbitrary formats.
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 enum CounterMsg {
     Increment,
     Ok, // Backup successfully received the Increment

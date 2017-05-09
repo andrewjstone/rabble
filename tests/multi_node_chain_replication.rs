@@ -3,7 +3,10 @@ extern crate rabble;
 
 #[macro_use]
 extern crate assert_matches;
-extern crate rustc_serialize;
+extern crate serde;
+
+#[macro_use]
+extern crate serde_derive;
 
 extern crate slog;
 extern crate slog_stdlog;
@@ -35,11 +38,10 @@ use rabble::{
     Envelope,
     Msg,
     ClusterStatus,
-    MsgpackSerializer,
-    Serialize,
     Node,
     CorrelationId
 };
+use rabble::serialize::{Serialize, MsgpackSerializer};
 
 const API_SERVER_IP: &'static str = "127.0.0.1:22001";
 const NUM_NODES: usize = 3;

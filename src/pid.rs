@@ -6,7 +6,7 @@ use node_id::NodeId;
 ///
 /// Pids can be grouped together for various reasons. This grouping acts like a namespace. If
 /// a Process is not a member of a group, the `group` member of the Pid will be `None`.
-#[derive(Debug, Clone, Hash, Eq, PartialEq, Ord, PartialOrd, RustcEncodable, RustcDecodable)]
+#[derive(Debug, Clone, Hash, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
 pub struct Pid {
     pub group: Option<String>,
     pub name: String,

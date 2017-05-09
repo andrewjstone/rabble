@@ -1,7 +1,7 @@
 use rabble::Pid;
 
 // Msg type parameter for messages sent to processes and services
-#[derive(Debug, Clone, Eq, PartialEq, RustcEncodable, RustcDecodable)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum RabbleUserMsg {
     Op(usize), // Request
     OpComplete, // Reply
@@ -11,7 +11,7 @@ pub enum RabbleUserMsg {
 }
 
 // Messages sent over the API server TCP connections
-#[derive(Debug, Clone, Eq, PartialEq, RustcEncodable, RustcDecodable)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum ApiClientMsg {
     Op(Pid, usize),
     OpComplete,

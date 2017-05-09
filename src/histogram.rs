@@ -1,7 +1,7 @@
 use std::fmt::{self, Debug, Formatter};
 use hdrsample;
 
-#[derive(Debug, Clone, Eq, PartialEq, RustcEncodable, RustcDecodable)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum TimeUnit {
     Seconds,
     Milliseconds,
@@ -9,7 +9,7 @@ pub enum TimeUnit {
     Nanoseconds
 }
 
-#[derive(Clone, PartialEq, RustcEncodable, RustcDecodable)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct Histogram {
     pub unit: TimeUnit,
     pub histogram: hdrsample::Histogram<u64>
