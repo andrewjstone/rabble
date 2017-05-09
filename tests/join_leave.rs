@@ -5,7 +5,10 @@ extern crate rabble;
 
 #[macro_use]
 extern crate assert_matches;
-extern crate rustc_serialize;
+extern crate serde;
+
+#[macro_use]
+extern crate serde_derive;
 
 extern crate slog;
 extern crate slog_stdlog;

@@ -1,7 +1,7 @@
 use std::fmt::{Display, Error, Formatter};
 use std::str::FromStr;
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq, Ord, PartialOrd, RustcEncodable, RustcDecodable)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
 pub struct NodeId {
     pub name: String,
     pub addr: String

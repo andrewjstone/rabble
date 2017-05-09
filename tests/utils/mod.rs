@@ -18,13 +18,12 @@ use rabble::{
     self,
     NodeId,
     Node,
-    MsgpackSerializer,
-    Serialize,
     Envelope,
     Pid,
     CorrelationId,
     Msg
 };
+use rabble::serialize::{Serialize, MsgpackSerializer};
 
 type CrNode = Node<RabbleUserMsg>;
 type CrReceiver = Receiver<Envelope<RabbleUserMsg>>;

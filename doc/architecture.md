@@ -45,7 +45,7 @@ actors in the system.
 Now, there is a caveat to the above description. If a user really desires open extensibility and
 doesn't care about the performance penalty or implementation complexity, they can use Boxed types,
 as long as they implement the required traits manually, namely: `Debug, Clone, Eq,
-PartialEq, RustcEncodable, and RustcDecodable`.
+PartialEq, Serialize, and Deserialize`.
 
 Note lastly, that this restriction on a single type for messages only applies to messages sent
 between actors. Client APIs may use their own message types.
@@ -59,7 +59,7 @@ enum, which is the single type shared among actors as described above.
 
 ```Rust
 pub trait Process : Send {
-  type Msg: Encodable + Decodable + Debug + Clone;
+  type Msg: Serialize + Deserialize + Debug + Clone;
   fn handle(&mut self,
             msg: Msg<Self::Msg>,
             from: Pid, correlation_id:

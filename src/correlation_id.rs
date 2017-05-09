@@ -4,7 +4,7 @@ use pid::Pid;
 ///
 /// All correlation ids must have a pid.
 /// Sometimes individual connections/requests aren't tracked so that field is optional.
-#[derive(Debug, Hash, Clone, Eq, PartialEq, RustcEncodable, RustcDecodable)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct CorrelationId {
     pub pid: Pid,
     pub connection: Option<u64>,

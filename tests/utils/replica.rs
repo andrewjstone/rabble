@@ -27,9 +27,7 @@ impl Replica {
     }
 }
 
-impl Process for Replica {
-    type Msg = RabbleUserMsg;
-
+impl Process<RabbleUserMsg> for Replica {
     fn handle(&mut self,
               msg: Msg<RabbleUserMsg>,
               _from: Pid,

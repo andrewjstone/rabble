@@ -2,7 +2,10 @@ extern crate amy;
 extern crate rabble;
 #[macro_use]
 extern crate assert_matches;
-extern crate rustc_serialize;
+extern crate serde;
+
+#[macro_use]
+extern crate serde_derive;
 
 mod utils;
 
@@ -20,10 +23,9 @@ use rabble::{
     NodeId,
     Envelope,
     Msg,
-    MsgpackSerializer,
-    Serialize,
     Node
 };
+use rabble::serialize::{Serialize, MsgpackSerializer};
 
 const CLUSTER_SERVER_IP: &'static str = "127.0.0.1:11001";
 const API_SERVER_IP: &'static str  = "127.0.0.1:22001";

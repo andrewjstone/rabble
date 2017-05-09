@@ -1,5 +1,3 @@
-use std::fmt::Debug;
-use rustc_serialize::{Encodable, Decodable};
 use cluster::ClusterStatus;
 use executor::ExecutorStatus;
 use correlation_id::CorrelationId;
@@ -7,8 +5,8 @@ use metrics::Metric;
 
 type Name = String;
 
-#[derive(Debug, Clone, PartialEq, RustcEncodable, RustcDecodable)]
-pub enum Msg<T: Encodable + Decodable + Debug + Clone> {
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum Msg<T> {
     User(T),
     ClusterStatus(ClusterStatus),
     ExecutorStatus(ExecutorStatus),

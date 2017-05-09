@@ -1,6 +1,8 @@
 use std::net::{TcpListener, TcpStream};
 use std::collections::HashMap;
 use std::io;
+use std::fmt::Debug;
+use serde;
 use amy::{Registrar, Notification, Event};
 use errors::*;
 use msg::Msg;
@@ -64,9 +66,10 @@ pub struct TcpServerHandler<C, S>
 
 }
 
-impl <C,S> TcpServerHandler<C, S>
+impl<'de, C, S> TcpServerHandler<C, S>
     where C: ConnectionHandler<ClientMsg=S::Msg>,
-          S: Serialize
+          S: Serialize,
+          C::Msg: serde::Serialize + serde::Deserialize<'de> + Clone + Debug
 
 {
     /// Create a new TcpServerHandler
@@ -187,9 +190,10 @@ impl <C,S> TcpServerHandler<C, S>
 }
 
 
-impl<C, S> ServiceHandler<C::Msg> for TcpServerHandler<C, S>
+impl<'de, C, S> ServiceHandler<C::Msg> for TcpServerHandler<C, S>
     where C: ConnectionHandler<ClientMsg=S::Msg>,
-          S: Serialize
+          S: Serialize,
+          C::Msg: serde::Serialize + serde::Deserialize<'de> + Clone + Debug
 {
     /// Initialize the state of the handler: Register timers and tcp listen socket
     fn init(&mut self,
@@ -269,12 +273,13 @@ impl<C, S> ServiceHandler<C::Msg> for TcpServerHandler<C, S>
 }
 
 /// Handle any readable notifications.
-fn handle_readable<C, S>(connection: &mut Connection<C, S>,
+fn handle_readable<'de, C, S>(connection: &mut Connection<C, S>,
                       request_timer_wheel: &mut TimerWheel<CorrelationId>,
                       node: &Node<C::Msg>,
                       output: &mut Vec<ConnectionMsg<C>>) -> Result<()>
     where C: ConnectionHandler<ClientMsg=S::Msg>,
-          S: Serialize
+          S: Serialize,
+          C::Msg: serde::Serialize + serde::Deserialize<'de> + Clone + Debug
 {
     while let Some(msg) = try!(connection.serializer.read_msg(&mut connection.sock)) {
         connection.handler.handle_network_msg(msg, output);
@@ -302,13 +307,14 @@ fn update_connection_timeout<C, S>(connection: &mut Connection<C, S>,
 /// Send client replies and route envelopes
 ///
 /// For any envelopes with correlation ids, record them in the request timer wheel.
-fn handle_connection_msgs<C, S>(request_timer_wheel: &mut TimerWheel<CorrelationId>,
+fn handle_connection_msgs<'de, C, S>(request_timer_wheel: &mut TimerWheel<CorrelationId>,
                              msgs: &mut Vec<ConnectionMsg<C>>,
                              serializer: &mut S,
                              sock: &mut TcpStream,
                              node: &Node<C::Msg>) -> Result<()>
     where C: ConnectionHandler<ClientMsg=S::Msg>,
-          S: Serialize
+          S: Serialize,
+          C::Msg: serde::Serialize + serde::Deserialize<'de> + Clone + Debug
 {
     for m in msgs.drain(..) {
         match m {

@@ -3,7 +3,7 @@ use std::fmt::{Display, Formatter, Error};
 use orset::{ORSet, Delta};
 use node_id::NodeId;
 
-#[derive(Debug, Clone, Eq, PartialEq, RustcEncodable, RustcDecodable)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Members {
     pub me: NodeId,
     orset: ORSet<NodeId>

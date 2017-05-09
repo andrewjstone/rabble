@@ -1,13 +1,11 @@
-use std::fmt::Debug;
-use rustc_serialize::{Encodable, Decodable};
 use envelope::Envelope;
 use correlation_id::CorrelationId;
 use pid::Pid;
 
 /// Implement this for a specific connection handler
-pub trait ConnectionHandler : Sized {
-    type Msg: Encodable + Decodable + Debug + Clone;
-    type ClientMsg: Debug;
+pub trait ConnectionHandler: Sized {
+    type Msg;
+    type ClientMsg;
 
     fn new(pid: Pid, id: u64) -> Self;
     fn handle_envelope(&mut self, Envelope<Self::Msg>, &mut Vec<ConnectionMsg<Self>>);

@@ -3,7 +3,10 @@ extern crate rabble;
 
 #[macro_use]
 extern crate assert_matches;
-extern crate rustc_serialize;
+extern crate serde;
+
+#[macro_use]
+extern crate serde_derive;
 
 extern crate slog;
 extern crate slog_stdlog;
@@ -32,12 +35,11 @@ use rabble::{
     Process,
     Envelope,
     Msg,
-    MsgpackSerializer,
-    Serialize,
     Node,
     NodeId,
     CorrelationId
 };
+use rabble::serialize::{Serialize, MsgpackSerializer};
 
 const CLUSTER_SERVER_IP: &'static str = "127.0.0.1:11001";
 const API_SERVER_IP: &'static str = "127.0.0.1:22001";
@@ -68,8 +70,7 @@ struct TestProcess {
     tx: mpsc::Sender<()>
 }
 
-impl Process for TestProcess {
-    type Msg = ();
+impl Process<()> for TestProcess {
 
     fn init(&mut self, executor_pid: Pid) -> Vec<Envelope<()>> {
         self.executor_pid = Some(executor_pid);

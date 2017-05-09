@@ -7,12 +7,13 @@ use rabble::{
     Envelope,
     CorrelationId,
     Msg,
-    MsgpackSerializer,
     TcpServerHandler,
     Service,
     ConnectionMsg,
     ConnectionHandler
 };
+
+use rabble::serialize::MsgpackSerializer;
 
 use super::messages::{RabbleUserMsg, ApiClientMsg};
 

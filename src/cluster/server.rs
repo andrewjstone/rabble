@@ -4,8 +4,8 @@ use std::net::{TcpListener, TcpStream};
 use std::fmt::Debug;
 use libc::EINPROGRESS;
 use net2::{TcpBuilder, TcpStreamExt};
-use rustc_serialize::{Encodable, Decodable};
-use msgpack::{Encoder, Decoder};
+use serde::{Serialize, Deserialize};
+use msgpack::{Serializer, Deserializer};
 use slog;
 use amy::{Registrar, Notification, Event, FrameReader, FrameWriter};
 use members::Members;
@@ -55,7 +55,7 @@ impl Conn {
 
 /// A struct that handles cluster membership connection and routing of messages to processes on
 /// other nodes.
-pub struct ClusterServer<T: Encodable + Decodable + Debug + Clone> {
+pub struct ClusterServer<T> {
     pid: Pid,
     node: NodeId,
     rx: Receiver<ClusterMsg<T>>,
@@ -73,7 +73,7 @@ pub struct ClusterServer<T: Encodable + Decodable + Debug + Clone> {
     metrics: ClusterMetrics
 }
 
-impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
+impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
     pub fn new(node: NodeId,
                rx: Receiver<ClusterMsg<T>>,
                executor_tx: Sender<ExecutorMsg<T>>,
@@ -192,7 +192,7 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
             trace!(self.logger, "send remote"; "to" => envelope.to.to_string());
             let mut encoded = Vec::new();
             let node = envelope.to.node.clone();
-            try!(ExternalMsg::Envelope(envelope).encode(&mut Encoder::new(&mut encoded))
+            try!(ExternalMsg::Envelope(envelope).serialize(&mut Serializer::new(&mut encoded))
                 .chain_err(|| ErrorKind::EncodeError(Some(id), Some(node))));
             try!(self.write(id, Some(encoded)));
         }
@@ -369,8 +369,8 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
                  .chain_err(|| ErrorKind::ReadError(id, node.clone())));
 
             for frame in conn.reader.iter_mut() {
-                let mut decoder = Decoder::new(&frame[..]);
-                let msg = try!(Decodable::decode(&mut decoder)
+                let mut decoder = Deserializer::new(&frame[..]);
+                let msg = try!(Deserialize::deserialize(&mut decoder)
                                .chain_err(|| ErrorKind::DecodeError(id, node.clone())));
                 output.push(msg);
             }
@@ -460,7 +460,7 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
         let orset = self.members.get_orset();
         let mut encoded = Vec::new();
         let msg = ExternalMsg::Members::<T> {from: self.node.clone(), orset: orset};
-        try!(msg.encode(&mut Encoder::new(&mut encoded))
+        try!(msg.serialize(&mut Serializer::new(&mut encoded))
              .chain_err(|| ErrorKind::EncodeError(Some(id), None)));
         Ok(encoded)
     }
@@ -497,7 +497,7 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
         debug!(self.logger, "Broadcasting delta"; "delta" => format!("{:?}", delta));
         let mut encoded = Vec::new();
         let msg = ExternalMsg::Delta::<T>(delta);
-        try!(msg.encode(&mut Encoder::new(&mut encoded))
+        try!(msg.serialize(&mut Serializer::new(&mut encoded))
              .chain_err(|| ErrorKind::EncodeError(None, None)));
         self.broadcast(encoded)
     }
@@ -505,7 +505,7 @@ impl<T: Encodable + Decodable + Debug + Clone> ClusterServer<T> {
     fn broadcast_pings(&mut self) -> Result<()> {
         let mut encoded = Vec::new();
         let msg = ExternalMsg::Ping::<T>;
-        try!(msg.encode(&mut Encoder::new(&mut encoded))
+        try!(msg.serialize(&mut Serializer::new(&mut encoded))
              .chain_err(|| ErrorKind::EncodeError(None, None)));
         self.broadcast(encoded)
     }

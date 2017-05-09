@@ -1,4 +1,4 @@
-use rustc_serialize::{Encodable, Decodable};
+use serde::{Serialize, Deserialize};
 use std::mem;
 use std::fmt::Debug;
 use std::sync::mpsc::{Sender, Receiver};
@@ -17,11 +17,11 @@ use correlation_id::CorrelationId;
 use metrics::Metrics;
 use super::{ExecutorStatus, ExecutorMetrics, ExecutorMsg};
 
-pub struct Executor<T: Encodable + Decodable + Send + Debug + Clone> {
+pub struct Executor<T> {
     pid: Pid,
     node: NodeId,
     envelopes: Vec<Envelope<T>>,
-    processes: HashMap<Pid, Box<Process<Msg=T>>>,
+    processes: HashMap<Pid, Box<Process<T>>>,
     service_senders: HashMap<Pid, amy::Sender<Envelope<T>>>,
     tx: Sender<ExecutorMsg<T>>,
     rx: Receiver<ExecutorMsg<T>>,
@@ -31,7 +31,7 @@ pub struct Executor<T: Encodable + Decodable + Send + Debug + Clone> {
     metrics: ExecutorMetrics
 }
 
-impl<T: Encodable + Decodable + Send + Debug + Clone> Executor<T> {
+impl<'de, T: Serialize + Deserialize<'de> + Send + Debug + Clone> Executor<T> {
     pub fn new(node: NodeId,
                tx: Sender<ExecutorMsg<T>>,
                rx: Receiver<ExecutorMsg<T>>,
@@ -95,7 +95,7 @@ impl<T: Encodable + Decodable + Send + Debug + Clone> Executor<T> {
         self.route_to_service(envelope);
     }
 
-    fn start(&mut self, pid: Pid, mut process: Box<Process<Msg=T>>) {
+    fn start(&mut self, pid: Pid, mut process: Box<Process<T>>) {
         let envelopes = process.init(self.pid.clone());
         self.processes.insert(pid, process);
         for envelope in envelopes {
