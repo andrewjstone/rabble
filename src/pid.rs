@@ -1,4 +1,4 @@
-use std::fmt::{Display, Error, Formatter};
+use std::fmt::{Debug, Display, Error, Formatter};
 use std::str::FromStr;
 use node_id::NodeId;
 
@@ -6,11 +6,19 @@ use node_id::NodeId;
 ///
 /// Pids can be grouped together for various reasons. This grouping acts like a namespace. If
 /// a Process is not a member of a group, the `group` member of the Pid will be `None`.
-#[derive(Debug, Clone, Hash, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Hash, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
 pub struct Pid {
     pub group: Option<String>,
     pub name: String,
     pub node: NodeId,
+}
+
+/// Explicitly format Pid in the display format since it is huge when pretty printing and they are
+/// used all over the place.
+impl Debug for Pid {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
+        Display::fmt(&self, f)
+    }
 }
 
 impl Display for Pid {
