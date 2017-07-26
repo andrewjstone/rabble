@@ -20,7 +20,7 @@ impl FromStr for NodeId {
     fn from_str(s: &str) -> Result<NodeId, String> {
         let v: Vec<&str> = s.split("@").collect();
         if v.len() != 2 {
-            return Err("Invalid Pid format - Must be of form 'name@addr'".to_string())
+            return Err("Invalid NodeId format - Must be of form 'name@addr'".to_string())
         }
         Ok(NodeId {
             name: v[0].to_string(),
