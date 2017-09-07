@@ -12,6 +12,7 @@ extern crate net2;
 extern crate libc;
 extern crate ferris;
 //extern crate hdrsample;
+extern crate bincode;
 
 #[macro_use]
 extern crate slog;
@@ -37,6 +38,8 @@ mod msg;
 mod timer_wheel;
 mod service;
 mod correlation_id;
+mod msg_registry;
+
 pub mod serialize;
 
 pub mod errors;
