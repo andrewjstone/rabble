@@ -2,17 +2,15 @@ use std::any::{TypeId, Any};
 use std::collections::HashMap;
 use bincode::deserialize;
 
-/// MsgIds for Rabble specific messages start at 2^31
-const RabbleMsgOffset: u32 = 2^31;
-
 /// A cluster-wide, globally unique MsgId. MsgIds for a given type must be the same on every node.
 ///
 /// MsgIds may never change or be re-used.
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub struct MsgId(u32);
 
 /// An error when a msg fails to deserialize given a buffer and it's MsgId
 #[derive(Debug, Clone)]
-pub struct DeserializeError(MsgId);
+pub struct DeserializeError(pub MsgId);
 
 /// A function that takes a bunch of bytes, deserializes it to specific type, then converts the type
 /// to a Box<Any>. If the deserialization fails, a DeserializeError is returned with the given
@@ -54,20 +52,23 @@ impl Registry {
             None => ()
         }
     }
+
+    pub fn get_msg_id(&self, type_id: TypeId) -> Option<MsgId> {
+    }
 }
 
 /// For a given registry, add the appropriate Type/MsgId and MsgId/Deserializer mappings
 ///
 /// let mut registry = Registry::new();
-/// register!(registry,
+/// register!(registry, {
 ///    String => 1,
 ///    u64 => 2
-/// );
+/// });
 ///
 #[macro_export]
 macro_rules! register {
     ($registry:ident {
-        $( $ty:ty => $msg_id:ident),+
+        $( $ty:ty => $msg_id:expr),+
     }) => {
         $(
             let deserializer = Box::new(|buf| {

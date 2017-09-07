@@ -34,11 +34,11 @@ mod process;
 mod envelope;
 mod executor;
 mod cluster;
-mod msg;
 mod timer_wheel;
 mod service;
 mod correlation_id;
 mod msg_registry;
+mod rabble_msgs;
 
 pub mod serialize;
 
@@ -49,9 +49,12 @@ pub use node_id::NodeId;
 pub use node::Node;
 pub use pid::Pid;
 pub use process::Process;
-pub use envelope::Envelope;
+pub use envelope::{
+    Msg,
+    MsgType,
+    Envelope,
+};
 pub use correlation_id::CorrelationId;
-pub use msg::Msg;
 pub use metrics::Metric;
 
 pub use cluster::{
