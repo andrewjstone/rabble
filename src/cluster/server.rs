@@ -10,16 +10,16 @@ use slog;
 use amy::{Registrar, Notification, Event, FrameReader, FrameWriter};
 use members::Members;
 use node_id::NodeId;
-use msg::Msg;
 use executor::ExecutorMsg;
 use timer_wheel::TimerWheel;
-use envelope::Envelope;
+use envelope::{Envelope, Msg};
 use orset::{ORSet, Delta};
 use pid::Pid;
 use correlation_id::CorrelationId;
 use errors::*;
 use metrics::Metrics;
 use super::{ClusterStatus, ClusterMsg, ExternalMsg, ClusterMetrics};
+use rabble_msgs::Reply;
 
 // TODO: This is totally arbitrary right now and should probably be user configurable
 const MAX_FRAME_SIZE: u32 = 100*1024*1024; // 100 MB
@@ -55,11 +55,11 @@ impl Conn {
 
 /// A struct that handles cluster membership connection and routing of messages to processes on
 /// other nodes.
-pub struct ClusterServer<T> {
+pub struct ClusterServer {
     pid: Pid,
     node: NodeId,
-    rx: Receiver<ClusterMsg<T>>,
-    executor_tx: Sender<ExecutorMsg<T>>,
+    rx: Receiver<ClusterMsg>,
+    executor_tx: Sender<ExecutorMsg>,
     executor_timer_id: usize,
     timer_id: usize,
     timer_wheel: TimerWheel<usize>,
@@ -73,12 +73,12 @@ pub struct ClusterServer<T> {
     metrics: ClusterMetrics
 }
 
-impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
+impl ClusterServer {
     pub fn new(node: NodeId,
-               rx: Receiver<ClusterMsg<T>>,
-               executor_tx: Sender<ExecutorMsg<T>>,
+               rx: Receiver<ClusterMsg>,
+               executor_tx: Sender<ExecutorMsg>,
                registrar: Registrar,
-               logger: slog::Logger) -> ClusterServer<T> {
+               logger: slog::Logger) -> ClusterServer {
         let pid = Pid {
             group: Some("rabble".to_string()),
             name: "cluster_server".to_string(),
@@ -134,7 +134,7 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
         }
     }
 
-    fn handle_cluster_msg(&mut self, msg: ClusterMsg<T>) -> Result<()> {
+    fn handle_cluster_msg(&mut self, msg: ClusterMsg) -> Result<()> {
         match msg {
             ClusterMsg::PollNotifications(notifications) => {
                 self.metrics.poll_notifications += 1;
@@ -171,12 +171,11 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
             established: self.established.keys().cloned().collect(),
             num_connections: self.connections.len()
         };
-        let envelope = Envelope {
-            to: correlation_id.pid.clone(),
-            from: self.pid.clone(),
-            msg: Msg::ClusterStatus(status),
-            correlation_id: Some(correlation_id)
-        };
+        let to = correlation_id.pid.clone();
+        let from = self.pid.clone();
+        let msg = Reply::Executor(ExecutorStatus);
+        let envelope = Envelope::new(to, from, msg, Some(correlation_id);
+
         // Route the response through the executor since it knows how to contact all Pids
         if let Err(mpsc::SendError(ExecutorMsg::Envelope(envelope))) =
             self.executor_tx.send(ExecutorMsg::Envelope(envelope))
@@ -187,7 +186,7 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
         Ok(())
     }
 
-    fn send_remote(&mut self, envelope: Envelope<T>) -> Result<()> {
+    fn send_remote(&mut self, envelope: Envelope) -> Result<()> {
         if let Some(id) = self.established.get(&envelope.to.node).cloned() {
             trace!(self.logger, "send remote"; "to" => envelope.to.to_string());
             let mut encoded = Vec::new();
@@ -256,7 +255,7 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
         Ok(())
     }
 
-    fn handle_decoded_message(&mut self, id: usize, msg: ExternalMsg<T>) -> Result<()> {
+    fn handle_decoded_message(&mut self, id: usize, msg: ExternalMsg) -> Result<()> {
         match msg {
             ExternalMsg::Members{from, orset} => {
                 info!(self.logger, "Got Members"; "id" => id, "from" => from.to_string());
@@ -297,7 +296,7 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
             if msg.is_none() {
                 if conn.writer.is_writable() {
                     // The socket has just became writable. We need to re-register it as only
-                    // readable, or it the event will keep firing indefinitely even if there is
+                    // readable, or the event will keep firing indefinitely even if there is
                     // no data to write.
                     try!(registrar.reregister(id, &conn.sock, Event::Read)
                          .chain_err(|| ErrorKind::RegistrarError(Some(id), conn.node.clone())));
@@ -361,7 +360,7 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
         None
     }
 
-    fn decode_messages(&mut self, id: usize) -> Result<Vec<ExternalMsg<T>>> {
+    fn decode_messages(&mut self, id: usize) -> Result<Vec<ExternalMsg>> {
         let mut output = Vec::new();
         if let Some(conn) = self.connections.get_mut(&id) {
             let node = conn.node.clone();
@@ -452,14 +451,14 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
     fn tick_executor(&mut self) -> Result<()> {
         trace!(self.logger, "tick_executor");
         // Panic if the executor is down.
-        self.executor_tx.send(ExecutorMsg::Tick).unwrap() ;
+        self.executor_tx.send(ExecutorMsg::Tick).unwrap();
         Ok(())
     }
 
     fn encode_members(&self, id: usize) -> Result<Vec<u8>> {
         let orset = self.members.get_orset();
         let mut encoded = Vec::new();
-        let msg = ExternalMsg::Members::<T> {from: self.node.clone(), orset: orset};
+        let msg = ExternalMsg::Members:: {from: self.node.clone(), orset: orset};
         try!(msg.serialize(&mut Serializer::new(&mut encoded))
              .chain_err(|| ErrorKind::EncodeError(Some(id), None)));
         Ok(encoded)
@@ -496,7 +495,7 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
     fn broadcast_delta(&mut self, delta: Delta<NodeId>) -> Result<()> {
         debug!(self.logger, "Broadcasting delta"; "delta" => format!("{:?}", delta));
         let mut encoded = Vec::new();
-        let msg = ExternalMsg::Delta::<T>(delta);
+        let msg = ExternalMsg::Delta::(delta);
         try!(msg.serialize(&mut Serializer::new(&mut encoded))
              .chain_err(|| ErrorKind::EncodeError(None, None)));
         self.broadcast(encoded)
@@ -504,7 +503,7 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
 
     fn broadcast_pings(&mut self) -> Result<()> {
         let mut encoded = Vec::new();
-        let msg = ExternalMsg::Ping::<T>;
+        let msg = ExternalMsg::Ping::;
         try!(msg.serialize(&mut Serializer::new(&mut encoded))
              .chain_err(|| ErrorKind::EncodeError(None, None)));
         self.broadcast(encoded)
@@ -587,7 +586,7 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
         }
     }
 
-    fn send_metrics(&mut self, envelope: Envelope<T>) {
+    fn send_metrics(&mut self, envelope: Envelope) {
         if let Msg::GetMetrics = envelope.msg {
             let new_envelope = Envelope {
                 to: envelope.from,
@@ -614,13 +613,12 @@ fn conn_write(id: usize,
               msg: Option<Vec<u8>>,
               registrar: &Registrar) -> Result<()>
 {
-        let writable = try!(conn.writer.write(&mut conn.sock, msg).chain_err(|| {
-            ErrorKind::WriteError(id, conn.node.clone())
-        }));
-        if !writable {
-            return registrar.reregister(id, &conn.sock, Event::Both)
-                .chain_err(|| ErrorKind::RegistrarError(Some(id), conn.node.clone()));
-        }
-        Ok(())
+    let writable = try!(conn.writer.write(&mut conn.sock, msg).chain_err(|| {
+        ErrorKind::WriteError(id, conn.node.clone())
+    }));
+    if !writable {
+        return registrar.reregister(id, &conn.sock, Event::Both)
+            .chain_err(|| ErrorKind::RegistrarError(Some(id), conn.node.clone()));
     }
-
+    Ok(())
+}

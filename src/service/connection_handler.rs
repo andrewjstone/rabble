@@ -2,13 +2,14 @@ use envelope::Envelope;
 use correlation_id::CorrelationId;
 use pid::Pid;
 
+/// A ConnectionHandler denotes the endpoint of a single connection in a network server
+///
 /// Implement this for a specific connection handler
 pub trait ConnectionHandler: Sized {
-    type Msg;
     type ClientMsg;
 
     fn new(pid: Pid, id: u64) -> Self;
-    fn handle_envelope(&mut self, Envelope<Self::Msg>, &mut Vec<ConnectionMsg<Self>>);
+    fn handle_envelope(&mut self, Envelope, &mut Vec<ConnectionMsg<Self>>);
     fn handle_network_msg(&mut self, Self::ClientMsg, &mut Vec<ConnectionMsg<Self>>);
 }
 
@@ -19,6 +20,6 @@ pub trait ConnectionHandler: Sized {
 /// connection.
 pub enum ConnectionMsg<C: ConnectionHandler>
 {
-    Envelope(Envelope<C::Msg>),
+    Envelope(Envelope),
     Client(C::ClientMsg, CorrelationId)
 }

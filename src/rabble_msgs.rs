@@ -38,12 +38,3 @@ pub fn register(registry: &mut Registry) {
         Notify => RabbleMsgOffset + 2
     });
 }
-
-$match Msg:
-Request => {
-},
-Reply => {
-},
-Notify => {
-}
-

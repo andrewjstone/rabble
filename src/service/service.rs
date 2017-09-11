@@ -11,24 +11,23 @@ use super::ServiceHandler;
 
 /// A system service that operates on a single thread. A service is registered via its pid
 /// with the executor and can send and receive messages to processes as well as other services.
-pub struct Service<T, H> {
+pub struct Service<H: ServiceHandler> {
     pub pid: Pid,
-    pub tx: amy::Sender<Envelope<T>>,
-    rx: amy::Receiver<Envelope<T>>,
-    node: Node<T>,
+    pub tx: amy::Sender<Envelope>,
+    rx: amy::Receiver<Envelope>,
+    node: Node,
     poller: Poller,
     registrar: Registrar,
     handler: H,
     logger: slog::Logger
 }
 
-impl<'de, T, H> Service<T, H>
-    where T: Serialize + Deserialize<'de> + Debug + Clone,
-          H: ServiceHandler<T>
+impl<H> Service<H>
+    where H: ServiceHandler
 {
-    pub fn new(pid: Pid, node: Node<T>, mut handler: H)
-        -> Result<Service<T, H>>
-    {
+
+    /// Create a new service
+    pub fn new(pid: Pid, node: Node, mut handler: H) -> Result<Service<H>> {
         let poller = Poller::new().unwrap();
         let mut registrar = poller.get_registrar()?;
         let (tx, rx) = registrar.channel()?;
@@ -77,9 +76,13 @@ impl<'de, T, H> Service<T, H>
 
     pub fn handle_envelopes(&mut self) -> Result<()> {
         while let Ok(envelope) = self.rx.try_recv() {
-            if let Msg::Shutdown = envelope.msg {
-                return Err(ErrorKind::Shutdown(self.pid.clone()).into());
-            }
+            decode!(envelope.msg, concrete, err, {
+                Notify => {
+                    match concrete {
+                        Notify::Shutdown => return Err(ErrorKind::Shutdown(self.pid.clone()).into()),
+                        _ =>
+                    }
+                }
             try!(self.handler.handle_envelope(&self.node, envelope, &self.registrar));
         }
         Ok(())

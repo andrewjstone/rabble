@@ -1,6 +1,5 @@
 use pid::Pid;
-use msg::Msg;
-use envelope::Envelope;
+use envelope::{Envelope, Msg};
 use correlation_id::CorrelationId;
 
 pub trait Process : Send {
