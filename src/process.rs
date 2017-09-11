@@ -3,16 +3,16 @@ use msg::Msg;
 use envelope::Envelope;
 use correlation_id::CorrelationId;
 
-pub trait Process<T> : Send {
+pub trait Process : Send {
     /// Initialize process state if necessary
-    fn init(&mut self, _executor_pid: Pid) -> Vec<Envelope<T>> {
+    fn init(&mut self, _executor_pid: Pid) -> Vec<Envelope> {
         Vec::new()
     }
 
     /// Handle messages from other actors
     fn handle(&mut self,
-              msg: Msg<T>,
+              msg: Msg,
               from: Pid,
               correlation_id: Option<CorrelationId>,
-              output: &mut Vec<Envelope<T>>);
+              output: &mut Vec<Envelope>);
 }

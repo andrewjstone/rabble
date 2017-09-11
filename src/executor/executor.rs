@@ -5,8 +5,7 @@ use std::sync::mpsc::{Sender, Receiver};
 use std::collections::HashMap;
 use amy;
 use slog;
-use time::Duration;
-use ferris::{Wheel, CopyWheel, Resolution};
+use time::Duration; use ferris::{Wheel, CopyWheel, Resolution};
 use envelope::Envelope;
 use pid::Pid;
 use process::Process;
@@ -16,27 +15,28 @@ use cluster::ClusterMsg;
 use correlation_id::CorrelationId;
 use metrics::Metrics;
 use super::{ExecutorStatus, ExecutorMetrics, ExecutorMsg};
+use rabble_msgs::Request;
 
-pub struct Executor<T> {
+pub struct Executor {
     pid: Pid,
     node: NodeId,
-    envelopes: Vec<Envelope<T>>,
-    processes: HashMap<Pid, Box<Process<T>>>,
-    service_senders: HashMap<Pid, amy::Sender<Envelope<T>>>,
-    tx: Sender<ExecutorMsg<T>>,
-    rx: Receiver<ExecutorMsg<T>>,
-    cluster_tx: Sender<ClusterMsg<T>>,
+    envelopes: Vec<Envelope>,
+    processes: HashMap<Pid, Box<Process>>,
+    service_senders: HashMap<Pid, amy::Sender<Envelope>>,
+    tx: Sender<ExecutorMsg>,
+    rx: Receiver<ExecutorMsg>,
+    cluster_tx: Sender<ClusterMsg>,
     timer_wheel: CopyWheel<(Pid, Option<CorrelationId>)>,
     logger: slog::Logger,
     metrics: ExecutorMetrics
 }
 
-impl<'de, T: Serialize + Deserialize<'de> + Send + Debug + Clone> Executor<T> {
+impl Executor {
     pub fn new(node: NodeId,
-               tx: Sender<ExecutorMsg<T>>,
-               rx: Receiver<ExecutorMsg<T>>,
-               cluster_tx: Sender<ClusterMsg<T>>,
-               logger: slog::Logger) -> Executor<T> {
+               tx: Sender<ExecutorMsg>,
+               rx: Receiver<ExecutorMsg>,
+               cluster_tx: Sender<ClusterMsg>,
+               logger: slog::Logger) -> Executor {
         let pid = Pid {
             group: Some("rabble".to_string()),
             name: "executor".to_string(),
@@ -86,16 +86,13 @@ impl<'de, T: Serialize + Deserialize<'de> + Send + Debug + Clone> Executor<T> {
             total_processes: self.processes.len(),
             services: self.service_senders.keys().cloned().collect()
         };
-        let envelope = Envelope {
-            to: correlation_id.pid.clone(),
-            from: self.pid.clone(),
-            msg: Msg::ExecutorStatus(status),
-            correlation_id: Some(correlation_id)
-        };
+        let to = correlation_id.pid.clone();
+        let from = self.pid.clone();
+        Envelope::new(to, from, Msg::ExecutorStatus(status), Some(correlation_id));
         self.route_to_service(envelope);
     }
 
-    fn start(&mut self, pid: Pid, mut process: Box<Process<T>>) {
+    fn start(&mut self, pid: Pid, mut process: Box<Process>) {
         let envelopes = process.init(self.pid.clone());
         self.processes.insert(pid, process);
         for envelope in envelopes {
@@ -125,7 +122,7 @@ impl<'de, T: Serialize + Deserialize<'de> + Send + Debug + Clone> Executor<T> {
     ///
     /// Note that all envelopes sent to an executor are sent from the local cluster server and must
     /// be addressed to local processes.
-    fn route(&mut self, envelope: Envelope<T>) {
+    fn route(&mut self, envelope: Envelope) {
         if self.node != envelope.to.node {
             self.cluster_tx.send(ClusterMsg::Envelope(envelope)).unwrap();
             return;
@@ -138,7 +135,7 @@ impl<'de, T: Serialize + Deserialize<'de> + Send + Debug + Clone> Executor<T> {
     /// Route an envelope to a process if it exists on this node.
     ///
     /// Return Ok(()) if the process exists, Err(envelope) otherwise.
-    fn route_to_process(&mut self, envelope: Envelope<T>) -> Result<(), Envelope<T>> {
+    fn route_to_process(&mut self, envelope: Envelope) -> Result<(), Envelope> {
         if envelope.to == self.pid {
             self.handle_executor_envelope(envelope);
             return Ok(());
@@ -178,7 +175,7 @@ impl<'de, T: Serialize + Deserialize<'de> + Send + Debug + Clone> Executor<T> {
     }
 
     /// Route an envelope to a service on this node
-    fn route_to_service(&self, envelope: Envelope<T>) {
+    fn route_to_service(&self, envelope: Envelope) {
         if let Some(tx) = self.service_senders.get(&envelope.to) {
             tx.send(envelope).unwrap();
         } else {
@@ -186,33 +183,31 @@ impl<'de, T: Serialize + Deserialize<'de> + Send + Debug + Clone> Executor<T> {
         }
     }
 
-    fn handle_executor_envelope(&mut self, envelope: Envelope<T>) {
+    fn handle_executor_envelope(&mut self, envelope: Envelope) {
         let Envelope {from, msg, correlation_id, ..} = envelope;
-        match msg {
-            Msg::StartTimer(time_in_ms) => {
-                self.timer_wheel.start((from, correlation_id),
-                                       Duration::milliseconds(time_in_ms as i64));
-                self.metrics.timers_started += 1;
-            },
-            Msg::CancelTimer(correlation_id) => {
-                self.timer_wheel.stop((from, correlation_id));
-                self.metrics.timers_cancelled += 1;
+        decode!(msg, concrete, err {
+            Request => {
+                match concrete {
+                    Request::GetMetrics => self.send_metrics(from, correlation_id),
+                    _ => error!(self.logger, "Invalid rabble_msgs::Request sent to executor";
+                                "from" => from.to_string(), "msg_id" => format!("{:?}", msg.id))
+                }
             }
-            Msg::GetMetrics => self.send_metrics(from, correlation_id),
-            _ => error!(self.logger, "Invalid message sent to executor";
-                        "from" => from.to_string(), "msg" => format!("{:?}", msg))
-        }
+            _ => {
+                error!(self.logger, "Failed to decode executor message";
+                       "error" => err.to_string(),
+                       "from" => from.to_string(),
+                       "msg_id" => format!("{:?}", msg.id));
+
+            }
+        });
     }
 
     fn send_metrics(&mut self, from: Pid, correlation_id: Option<CorrelationId>) {
         self.metrics.processes = self.processes.len() as i64;
         self.metrics.services = self.service_senders.len() as i64;
-        let envelope = Envelope {
-            to: from,
-            from: self.pid.clone(),
-            msg: Msg::Metrics(self.metrics.data()),
-            correlation_id: correlation_id
-        };
+        let msg = Msg::Metrics(self.metrics.data());
+        let envelope = Envelope::new(from, self.pid.clone(), msg, correlation_id);
         self.route(envelope);
     }
 }

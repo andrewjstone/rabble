@@ -14,6 +14,22 @@ error_chain! {
     }
 
     errors {
+        DowncastFailed(id: MsgId) {
+            description("Downcast from Box<Any> to Box<T> failed")
+            display("Downcast from Box<Any> to Box<T> failed for id={:?}", id.0)
+        }
+        UnexpectedMsg(id: MsgId) {
+            description("Unexpected message")
+            display("Unexpected message: id={:?}", id.0)
+        }
+        UnregisteredMsg(id: MsgId) {
+            description("Unregistered message")
+            display("Unregistered message: id={:?}", id.0)
+        }
+        DeserializeError(id: MsgId) {
+            description("Failed to deserialize message")
+            display("Faield to deserialize messsage: id={:?}", id.0)
+        }
         EncodeError(id: Option<usize>, to: Option<NodeId>) {
             description("Failed to encode message")
             display("Failed to encode message to {:?}, id={:?}", to, id)

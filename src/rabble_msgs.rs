@@ -31,10 +31,19 @@ pub enum Notify {
 }
 
 /// Register all rabble specific messages
-pub fn register(registry: Registry) {
+pub fn register(registry: &mut Registry) {
     register!(registry, {
         Request => RabbleMsgOffset,
         Reply => RabbleMsgOffset + 1,
         Notify => RabbleMsgOffset + 2
     });
 }
+
+$match Msg:
+Request => {
+},
+Reply => {
+},
+Notify => {
+}
+

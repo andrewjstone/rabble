@@ -4,11 +4,11 @@ use pid::Pid;
 use correlation_id::CorrelationId;
 use amy;
 
-pub enum ExecutorMsg<T> {
-    Start(Pid, Box<Process<T>>),
+pub enum ExecutorMsg {
+    Start(Pid, Box<Process>),
     Stop(Pid),
-    Envelope(Envelope<T>),
-    RegisterService(Pid, amy::Sender<Envelope<T>>),
+    Envelope(Envelope),
+    RegisterService(Pid, amy::Sender<Envelope>),
     GetStatus(CorrelationId),
     Shutdown,
     Tick

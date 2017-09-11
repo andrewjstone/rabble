@@ -27,20 +27,20 @@ macro_rules! send {
 /// The Node api is used by services and their handlers to send messages, get status, join
 /// nodes into a cluster, etc...
 #[derive(Clone)]
-pub struct Node<T> {
+pub struct Node {
     pub id: NodeId,
     pub logger: slog::Logger,
-    executor_tx: Sender<ExecutorMsg<T>>,
-    cluster_tx: Sender<ClusterMsg<T>>
+    executor_tx: Sender<ExecutorMsg>,
+    cluster_tx: Sender<ClusterMsg>
 }
 
-impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> Node<T> {
+impl Node {
     /// Create a new node. This function should not be called by the user directly. It is called by
     /// by the user call to `rabble::rouse(..)` that initializes a rabble system for a single node.
     pub fn new(id: NodeId,
-               executor_tx: Sender<ExecutorMsg<T>>,
-               cluster_tx: Sender<ClusterMsg<T>>,
-               logger: slog::Logger) -> Node<T> {
+               executor_tx: Sender<ExecutorMsg>,
+               cluster_tx: Sender<ClusterMsg>,
+               logger: slog::Logger) -> Node {
         Node {
             id: id,
             executor_tx: executor_tx,
@@ -72,7 +72,7 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> Node<T> {
     }
 
     /// Add a process to the executor that can be sent Envelopes addressed to its pid
-    pub fn spawn(&self, pid: &Pid, process: Box<Process<T>>) -> Result<()> {
+    pub fn spawn(&self, pid: &Pid, process: Box<Process>) -> Result<()> {
         send!(self.executor_tx,
               ExecutorMsg::Start(pid.clone(), process),
               Some(pid),
@@ -89,7 +89,7 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> Node<T> {
 
     /// Register a Service's sender with the executor so that it can be sent messages addressed to
     /// its pid
-    pub fn register_service(&self, pid: &Pid, tx: &amy::Sender<Envelope<T>>) -> Result<()>
+    pub fn register_service(&self, pid: &Pid, tx: &amy::Sender<Envelope>) -> Result<()>
     {
         send!(self.executor_tx,
               ExecutorMsg::RegisterService(pid.clone(), tx.try_clone()?),
@@ -98,7 +98,7 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> Node<T> {
     }
 
     /// Send an envelope to the executor so it gets routed to the appropriate process or service
-    pub fn send(&self, envelope: Envelope<T>) -> Result<()> {
+    pub fn send(&self, envelope: Envelope) -> Result<()> {
         let to = envelope.to.clone();
         send!(self.executor_tx,
               ExecutorMsg::Envelope(envelope),
