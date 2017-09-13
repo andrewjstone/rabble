@@ -1,5 +1,6 @@
 use serde::{Serialize, Deserialize};
 use std::fmt::Debug;
+use histogram::Histogram;
 
 // A container type for status information for a given component
 pub trait Metrics<'de>: Serialize + Deserialize<'de> + Debug + Clone {
@@ -9,7 +10,8 @@ pub trait Metrics<'de>: Serialize + Deserialize<'de> + Debug + Clone {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Metric {
     Gauge(i64),
-    Counter(u64)
+    Counter(u64),
+    Histogram(Histogram)
 }
 
 /// Generate a struct: `$struct_name` from a set of metrics
@@ -29,7 +31,7 @@ macro_rules! metrics {
         impl $struct_name {
             pub fn new() -> $struct_name {
                 $struct_name {
-                    $( $field: 0 ),+
+                    $( $field: $ty::default() ),+
                 }
             }
         }
@@ -37,7 +39,7 @@ macro_rules! metrics {
         impl<'de> Metrics<'de> for $struct_name {
             fn data(&self) -> Vec<(String, Metric)> {
                 vec![
-                    $( (stringify!($field).into(), type_to_metric!($ty)(self.$field)) ),+
+                    $( (stringify!($field).into(), type_to_metric!($ty)(self.$field.clone())) ),+
                     ]
             }
         }
@@ -47,4 +49,5 @@ macro_rules! metrics {
 macro_rules! type_to_metric {
     (i64) => { Metric::Gauge };
     (u64) => { Metric::Counter };
+    (Histogram) => { Metric::Histogram };
 }

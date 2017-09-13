@@ -3,6 +3,7 @@ use std::mem;
 use std::fmt::Debug;
 use std::sync::mpsc::{Sender, Receiver};
 use std::collections::HashMap;
+use std::time::Instant;
 use amy;
 use slog;
 use time::Duration;
@@ -65,7 +66,9 @@ impl<'de, T: Serialize + Deserialize<'de> + Send + Debug + Clone> Executor<T> {
             match msg {
                 ExecutorMsg::Envelope(envelope) => {
                     self.metrics.received_envelopes += 1;
+                    let start = Instant::now();
                     self.route(envelope);
+                    self.metrics.route_envelope_ns.0 += duration(start);
                 },
                 ExecutorMsg::Start(pid, process) => self.start(pid, process),
                 ExecutorMsg::Stop(pid) => self.stop(pid),
@@ -217,3 +220,11 @@ impl<'de, T: Serialize + Deserialize<'de> + Send + Debug + Clone> Executor<T> {
     }
 }
 
+/// Return the number of nanoseconds since start
+///
+/// Ignore any possible overflow as the number of seconds is guaranteed to be small /// and likely 0
+#[inline]
+fn duration(start: Instant) -> u64 {
+    let elapsed = start.elapsed();
+    elapsed.as_secs()*1000000000 + elapsed.subsec_nanos() as u64
+}

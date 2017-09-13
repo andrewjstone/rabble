@@ -11,13 +11,14 @@ extern crate time;
 extern crate net2;
 extern crate libc;
 extern crate ferris;
-//extern crate hdrsample;
+extern crate hdrsample;
 
 #[macro_use]
 extern crate slog;
 extern crate slog_stdlog;
 
 extern crate serde;
+extern crate serde_bytes;
 
 #[macro_use]
 extern crate serde_derive;
@@ -37,6 +38,8 @@ mod msg;
 mod timer_wheel;
 mod service;
 mod correlation_id;
+mod histogram;
+
 pub mod serialize;
 
 pub mod errors;
@@ -59,7 +62,8 @@ pub use cluster::{
 pub use executor::{
     Executor,
     ExecutorStatus,
-    ExecutorMetrics
+    ExecutorMetrics,
+    ExecutorMsg
 };
 
 pub use service::{

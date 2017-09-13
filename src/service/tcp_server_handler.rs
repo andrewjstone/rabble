@@ -129,7 +129,7 @@ impl<'de, C, S> TcpServerHandler<C, S>
         let id = try!(registrar.register(&sock, Event::Read)
                       .chain_err(|| "Failed to register new socket for reading"));
         let handler = C::new(self.pid.clone(), id as u64);
-        let slot = self.connection_timer_wheel.as_mut().map_or(0, |mut tw| tw.insert(id));
+        let slot = self.connection_timer_wheel.as_mut().map_or(0, |tw| tw.insert(id));
         let connection = Connection::new(id, handler, sock, slot);
         self.connections.insert(id, connection);
         Ok(())
@@ -170,7 +170,7 @@ impl<'de, C, S> TcpServerHandler<C, S>
     fn request_tick(&mut self, node: &Node<C::Msg>) -> Result<()>{
         for correlation_id in self.request_timer_wheel.expire() {
             let conn_id = correlation_id.connection.as_ref().unwrap();
-            if let Some(mut connection) = self.connections.get_mut(&(*conn_id as usize)) {
+            if let Some(connection) = self.connections.get_mut(&(*conn_id as usize)) {
                 let envelope = Envelope {
                     from: self.pid.clone(),
                     to: self.pid.clone(),
@@ -259,7 +259,7 @@ impl<'de, C, S> ServiceHandler<C::Msg> for TcpServerHandler<C, S>
         // Don't bother cancelling request timers... Just ignore the timeouts in the connection if
         // the request has already received its reply
         let conn_id = envelope.correlation_id.as_ref().unwrap().connection.as_ref().cloned().unwrap();
-        if let Some(mut connection) = self.connections.get_mut(&(conn_id as usize)) {
+        if let Some(connection) = self.connections.get_mut(&(conn_id as usize)) {
             connection.handler.handle_envelope(envelope, &mut self.output);
             try!(handle_connection_msgs(&mut self.request_timer_wheel,
                                         &mut self.output,
@@ -299,7 +299,7 @@ fn update_connection_timeout<C, S>(connection: &mut Connection<C, S>,
           S: Serialize
 {
     if timer_wheel.is_none() { return; }
-    let mut timer_wheel = timer_wheel.as_mut().unwrap();
+    let timer_wheel = timer_wheel.as_mut().unwrap();
     timer_wheel.remove(&connection.id, connection.timer_wheel_slot);
     connection.timer_wheel_slot = timer_wheel.insert(connection.id);
 }
