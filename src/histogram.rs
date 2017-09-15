@@ -5,8 +5,6 @@ use hdrsample::serialization::V2Serializer;
 use serde::ser::{self, Serialize, Serializer};
 use serde::de::{self, Deserialize, Deserializer};
 use serde_bytes::{Bytes, ByteBuf};
-use msgpack;
-
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum TimeUnit {
@@ -27,7 +25,7 @@ impl Histogram {
 }
 
 /// A typed histogram specifies a time unit
-#[derive(Clone, PartialEq, Serialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct TypedHistogram {
     pub unit: TimeUnit,
     pub histogram: Histogram
@@ -78,6 +76,7 @@ impl<'de> Deserialize<'de> for Histogram {
 
 #[cfg(test)]
 mod tests {
+    use msgpack;
     use super::*;
 
     #[test]
