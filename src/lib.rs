@@ -12,6 +12,7 @@ extern crate net2;
 extern crate libc;
 extern crate ferris;
 extern crate hdrsample;
+extern crate chashmap;
 
 #[macro_use]
 extern crate slog;
@@ -39,6 +40,7 @@ mod timer_wheel;
 mod service;
 mod correlation_id;
 mod histogram;
+mod mailboxes;
 
 pub mod serialize;
 
@@ -53,6 +55,7 @@ pub use envelope::Envelope;
 pub use correlation_id::CorrelationId;
 pub use msg::Msg;
 pub use metrics::Metric;
+pub use mailboxes::Mailboxes;
 
 pub use cluster::{
     ClusterServer,
