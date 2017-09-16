@@ -1,4 +1,3 @@
-use std::fmt::{self, Debug, Formatter};
 use hdrsample;
 use hdrsample::serialization::Deserializer as hdrsampleDeserializer;
 use hdrsample::serialization::V2Serializer;
@@ -16,7 +15,7 @@ pub enum TimeUnit {
 
 /// A histogram that can be serialized via Serde
 #[derive(Debug, Clone, PartialEq)]
-pub struct Histogram(hdrsample::Histogram<u64>);
+pub struct Histogram(pub hdrsample::Histogram<u64>);
 
 impl Histogram {
     pub fn new() -> Histogram {
@@ -24,25 +23,9 @@ impl Histogram {
     }
 }
 
-/// A typed histogram specifies a time unit
-#[derive(Clone, PartialEq, Serialize, Deserialize)]
-pub struct TypedHistogram {
-    pub unit: TimeUnit,
-    pub histogram: Histogram
-}
-
-impl TypedHistogram {
-    pub fn new(unit: TimeUnit) -> TypedHistogram {
-        TypedHistogram {
-            unit: unit,
-            histogram: Histogram::new()
-        }
-    }
-}
-
-impl Debug for TypedHistogram {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "Histogram ({:?})", self.unit)
+impl Default for Histogram {
+    fn default() -> Histogram {
+        Histogram::new()
     }
 }
 
