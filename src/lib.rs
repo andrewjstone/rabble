@@ -62,7 +62,8 @@ pub use cluster::{
 pub use executor::{
     Executor,
     ExecutorStatus,
-    ExecutorMetrics
+    ExecutorMetrics,
+    ExecutorMsg
 };
 
 pub use service::{
