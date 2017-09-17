@@ -31,6 +31,8 @@ serde_bytes = "0.10"
 rmp-serde = "0.13"
 hdrsample = "4.0"
 chashmap = "2.2"
+coco = "0.2"
+parking_lot = "0.4"
 
 [dev-dependencies]
 assert_matches = "1.0"
