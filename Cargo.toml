@@ -12,7 +12,7 @@ license = "Apache-2.0"
 no_timerfd = ["amy/no_timerfd"]
 
 [dependencies]
-amy = "^0.7.2"
+amy = "0.8"
 orset = "0.2"
 time = "0.1"
 net2 = "0.2"

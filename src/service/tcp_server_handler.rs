@@ -160,7 +160,7 @@ impl<'de, C, S> TcpServerHandler<C, S>
     fn connection_tick(&mut self, registrar: &Registrar) {
         for id in self.connection_timer_wheel.as_mut().unwrap().expire() {
             if let Some(connection) = self.connections.remove(&id) {
-                let _ = registrar.deregister(connection.sock);
+                let _ = registrar.deregister(&connection.sock);
                 // TODO: Log connection timeout
             }
         }
@@ -239,7 +239,7 @@ impl<'de, C, S> ServiceHandler<C::Msg> for TcpServerHandler<C, S>
         if let Err(e) = self.handle_connection_notification(&notification, &node) {
             // Unwrap is correct here since the above call only fails if the connection exists
             let connection = self.connections.remove(&notification.id).unwrap();
-            let _ = registrar.deregister(connection.sock);
+            let _ = registrar.deregister(&connection.sock);
             let errmsg = e.to_string();
             return Err(e).chain_err(|| format!("{}: id {}", errmsg, notification.id));
         }

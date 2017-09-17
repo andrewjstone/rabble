@@ -475,7 +475,7 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
     /// Close an existing connection and remove all related state.
     fn close(&mut self, id: usize) {
         if let Some(conn) = self.connections.remove(&id) {
-            let _ = self.registrar.deregister(conn.sock);
+            let _ = self.registrar.deregister(&conn.sock);
             self.timer_wheel.remove(&id, conn.timer_wheel_index);
             if let Some(node) = conn.node {
                 // Remove established connection if it matches this id
@@ -565,7 +565,7 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
         self.established = HashMap::new();
         for (id, conn) in self.connections.drain() {
             self.timer_wheel.remove(&id, conn.timer_wheel_index);
-            if let Err(e) = self.registrar.deregister(conn.sock) {
+            if let Err(e) = self.registrar.deregister(&conn.sock) {
                 error!(self.logger, "Failed to deregister socket";
                        "id" => id, "peer" => format!("{:?}", conn.node),
                        "error" => e.to_string());
@@ -578,7 +578,7 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
             if let Some(id) = self.established.remove(&node) {
                 let conn = self.connections.remove(&id).unwrap();
                 self.timer_wheel.remove(&id, conn.timer_wheel_index);
-                if let Err(e) = self.registrar.deregister(conn.sock) {
+                if let Err(e) = self.registrar.deregister(&conn.sock) {
                     error!(self.logger, "Failed to deregister socket";
                            "id" => id, "peer" => conn.node.unwrap().to_string(),
                            "error" => e.to_string());
