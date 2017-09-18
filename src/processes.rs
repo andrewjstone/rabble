@@ -1,7 +1,7 @@
 use std::mem;
 use std::time::Duration;
 use std::collections::VecDeque;
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use parking_lot::Mutex;
 use chashmap::CHashMap;
@@ -83,11 +83,11 @@ impl<T> Entry<T> {
 pub struct Processes<T> {
     counter: AtomicUsize,
     map: CHashMap<Pid, Entry<T>>,
-    deque: Option<Mutex<VecDeque<Pcb<T>>>>,
+    deque: Option<Arc<Mutex<VecDeque<Pcb<T>>>>>,
 }
 
 impl<T> Processes<T> {
-    pub fn new(deque: Mutex<VecDeque<Pcb<T>>>) -> Processes<T> {
+    pub fn new(deque: Arc<Mutex<VecDeque<Pcb<T>>>>) -> Processes<T> {
         Processes {
             counter: AtomicUsize::new(0),
             map: CHashMap::with_capacity(1024),
@@ -160,18 +160,18 @@ impl<T> Processes<T> {
     /// Send an envelope to a process or service at the given pid
     ///
     /// For processes:
-    ///     If the pcb is present in the entry, add the envelope to the pcb, remove it from the
-    ///     entry and put it on the shared deque so it can be scheduled.
+    ///   If the pcb is present in the entry, add the envelope to the pcb, remove it from the
+    ///   entry and put it on the shared deque so it can be scheduled.
     ///
-    ///     If the pcb is not present, add the envelope to the entry mailbox.
+    ///   If the pcb is not present, add the envelope to the entry mailbox.
     ///
-    ///     Returns `Ok(())` if the entry exists, `Err(Envelope)` otherwise
+    ///   Returns `Ok(())` if the entry exists, `Err(Envelope)` otherwise
     ///
     /// For services:
-    ///     Lookup the sender for the service's channel and send directly
+    ///   Lookup the sender for the service's channel and send directly
     ///
-    ///     Returns `Ok(())` if the entry exists, `Err(Envelope)` otherwise
-    ///     Also returns `Err(Envelope)` if the send fails
+    ///   Returns `Ok(())` if the entry exists, `Err(Envelope)` otherwise
+    ///   Also returns `Err(Envelope)` if the send fails
     ///
     pub fn send(&mut self, envelope: Envelope<T>) -> Result<(), Envelope<T>> {
         // Satisfy the borrow checker by removing the deque from self temporarily
@@ -223,6 +223,7 @@ impl<T> Processes<T> {
     /// If the entry no longer exists, or the id of the entry differs from that of `scheduled_pcb`,
     /// it means the process was killed. In that case drop `scheduled_pcb` and return `None`.
     pub fn deschedule(&mut self, mut scheduled_pcb: Pcb<T>) -> Option<Pcb<T>> {
+        assert!(scheduled_pcb.mailbox.is_empty());
         self.map.get_mut(&scheduled_pcb.pid).and_then(|mut entry| {
             if let Entry::Process {id, ref mut pcb, ref mut mailbox} = *entry {
                 if scheduled_pcb.id != id {
@@ -241,5 +242,107 @@ impl<T> Processes<T> {
             // been removed, we just go ahead and drop the scheduled_pcb.
             None
         })
+    }
+}
+
+mod tests {
+
+    use std::collections::VecDeque;
+    use std::sync::Arc;
+    use parking_lot::Mutex;
+    use super::*;
+    use process::Process;
+    use node_id::NodeId;
+    use correlation_id::CorrelationId;
+    use pid::Pid;
+    use msg::Msg;
+
+    struct TestProcess;
+
+    impl Process<()> for TestProcess {
+        fn handle(&mut self,
+                  _: Msg<()>,
+                  _: Pid,
+                  _: Option<CorrelationId>,
+                  _: &mut Vec<Envelope<()>>) {
+        }
+    }
+
+    fn node() -> NodeId {
+        NodeId {
+            name: "test-node".to_owned(),
+            addr: "127.0.0.1:5000".to_owned()
+        }
+    }
+
+    fn pid(name: &str) -> Pid {
+        Pid {
+            name: name.to_owned(),
+            group: None,
+            node: node()
+        }
+    }
+
+    fn envelope() -> Envelope<()> {
+        Envelope::new(pid("pid1"), pid("tester"), Msg::User(()), None)
+    }
+
+    #[test]
+    fn process_lifecycle() {
+        let deque = Arc::new(Mutex::new(VecDeque::new()));
+        let mut processes = Processes::new(deque.clone());
+        let pid1 = pid("pid1");
+        processes.spawn(pid1.clone(), Box::new(TestProcess) as Box<Process<()>>).unwrap();
+
+        // Attempting to spawn a process with the same pid should fail
+        assert_eq!(Err(()), processes.spawn(pid1, Box::new(TestProcess) as Box<Process<()>>));
+
+        // Send the first message to the process. This should cause the Pcb to be sent over the
+        // deque.
+        processes.send(envelope()).unwrap();
+
+        // Ensure the pcb is put on the deque for scheduling and the pcb contains the envelope in
+        // its mailbox
+        let mut pcb = {
+            // The extra scope is to ensure the deque goes out of scope and gets unlocked
+            let mut deque = deque.lock();
+            let pcb = (*deque).pop_back().unwrap();
+            assert_eq!(pcb.mailbox.len(), 1);
+            pcb
+        };
+
+        // Ensure sending a msg to a process that was already dequed doesn't increase the mailbox of
+        // the pcb and the deque is still empty.
+        {
+            processes.send(envelope()).unwrap();
+            let mut deque = deque.lock();
+            assert_eq!((*deque).len(), 0);
+            assert_eq!(pcb.mailbox.len(), 1);
+        }
+
+        // Remove the message off the mailbox (this is an invariant any scheduler must maintain)
+        pcb.mailbox.pop();
+
+        // Try to deschedule the process. This should fail because there the second send inserted an
+        // envelope into the entry mailbox. The deschedule should swap the empty mailbox of the pcb
+        // with that of the one in the entry and return the pcb.
+        let pcb = processes.deschedule(pcb);
+        assert!(pcb.is_some());
+        let mut pcb = pcb.unwrap();
+        assert_eq!(pcb.mailbox.len(), 1);
+
+        // Pop the last message off the pcb and attempt to deschedule again. This time the
+        // deschedule should succeed and `None` should be returned. We only sent two messages
+        // to the process and we have already popped both of them.
+        pcb.mailbox.pop();
+        assert!(processes.deschedule(pcb).is_none());
+
+        // Ensure killing a process removes it from the map
+        assert_eq!(processes.map.len(), 1);
+        processes.kill(&pid("pid1"));
+        assert_eq!(processes.map.len(), 0);
+
+        // Sending to a non-existant process should fail
+        assert_matches!(processes.send(envelope()), Err(_));
     }
 }

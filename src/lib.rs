@@ -3,6 +3,10 @@
 #[macro_use]
 extern crate error_chain;
 
+#[cfg(test)]
+#[macro_use]
+extern crate assert_matches;
+
 extern crate orset;
 extern crate rmp_serde as msgpack;
 extern crate protobuf;
