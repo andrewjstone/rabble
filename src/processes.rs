@@ -2,6 +2,7 @@ use std::mem;
 use std::time::Duration;
 use std::collections::VecDeque;
 use std::sync::mpsc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use parking_lot::Mutex;
 use chashmap::CHashMap;
 use amy::{Sender, ChannelError};
@@ -17,6 +18,10 @@ const INITIAL_MAILBOX_CAPACITY: usize = 16;
 /// This struct contains a process, as well as a local mailbox and statistics about process
 /// scheduling.
 pub struct Pcb<T> {
+    /// This is to prevent race conditions where an old Pcb is attempted to be descheduled onto
+    /// newer process, such as could happen if the old process was killed and a new one was added,
+    /// but the scheduler hadn't yet attempted to deschedule the old one.
+    id: usize,
     pid: Pid,
     process: Box<Process<T>>,
     mailbox: Vec<Envelope<T>>,
@@ -29,8 +34,9 @@ pub struct Pcb<T> {
 }
 
 impl<T> Pcb<T> {
-    pub fn new(pid: Pid, process: Box<Process<T>>) -> Pcb<T> {
+    pub fn new(id: usize, pid: Pid, process: Box<Process<T>>) -> Pcb<T> {
         Pcb {
+            id: id,
             pid: pid,
             process: process,
             mailbox: Vec::with_capacity(INITIAL_MAILBOX_CAPACITY),
@@ -44,20 +50,21 @@ impl<T> Pcb<T> {
 
 /// An entry in the Processes map
 pub enum Entry<T> {
-    Process { pcb: Option<Pcb<T>>, mailbox: Vec<Envelope<T>> },
-    Service { tx: Sender<Envelope<T>> }
+    Process { id: usize, pcb: Option<Pcb<T>>, mailbox: Vec<Envelope<T>> },
+    Service { id: usize, tx: Sender<Envelope<T>> }
 }
 
 impl<T> Entry<T> {
-    pub fn new_process(pid: Pid, process: Box<Process<T>>) -> Entry<T> {
+    pub fn new_process(id: usize, pid: Pid, process: Box<Process<T>>) -> Entry<T> {
         Entry::Process {
-            pcb: Some(Pcb::new(pid, process)),
+            id: id,
+            pcb: Some(Pcb::new(id, pid, process)),
             mailbox: Vec::with_capacity(INITIAL_MAILBOX_CAPACITY)
         }
     }
 
-    pub fn new_service(tx: Sender<Envelope<T>>) -> Entry<T> {
-        Entry::Service { tx: tx }
+    pub fn new_service(id: usize, tx: Sender<Envelope<T>>) -> Entry<T> {
+        Entry::Service { id: id, tx: tx }
     }
 }
 
@@ -74,6 +81,7 @@ impl<T> Entry<T> {
 /// if it hasn't received any messages.
 ///
 pub struct Processes<T> {
+    counter: AtomicUsize,
     map: CHashMap<Pid, Entry<T>>,
     deque: Option<Mutex<VecDeque<Pcb<T>>>>,
 }
@@ -81,6 +89,7 @@ pub struct Processes<T> {
 impl<T> Processes<T> {
     pub fn new(deque: Mutex<VecDeque<Pcb<T>>>) -> Processes<T> {
         Processes {
+            counter: AtomicUsize::new(0),
             map: CHashMap::with_capacity(1024),
             deque: Some(deque)
         }
@@ -91,11 +100,25 @@ impl<T> Processes<T> {
     /// This should only be called when a new process is created.
     /// Returns `Ok(())` if the entry doesn't already exist, `Err(())` otherwise.
     pub fn spawn(&self, pid: Pid, process: Box<Process<T>>) -> Result<(), ()> {
-        if self.map.contains_key(&pid) {
-            return Err(());
-        }
-        self.map.insert(pid.clone(), Entry::new_process(pid, process)).unwrap();
-        Ok(())
+        // We need to ensure the key doesn't exist before inserting it.
+        // We don't use `insert`, because we don't want to replace any existing keys. We can't just
+        // call `self.map.contains_key(&pid)` because after that call the lock is not held and
+        // another key can insert into the map.
+        // Therefore we upsert and then check to see the same value exists as we tried to insert.
+        // That way we can return an error if we tried to insert but a key already existed.
+        let new_id = self.counter.fetch_add(1, Ordering::SeqCst);
+        self.map.upsert(pid.clone(), || Entry::new_process(new_id, pid.clone(), process), |_| {});
+        self.map.get(&pid).map_or(Err(()), |entry| {
+            match *entry {
+                Entry::Process { id, ..} => {
+                    if id == new_id {
+                        return Ok(());
+                    }
+                    Err(())
+                }
+                Entry::Service {..} => Err(())
+            }
+        })
     }
 
     /// Register the sender for a service so messages can be sent to it
@@ -103,11 +126,25 @@ impl<T> Processes<T> {
     /// This should only be called once for a service.
     /// Returns `Ok(())` if the entry doesn't already exist, `Err(())` otherwise.
     pub fn register_service(&self, pid: Pid, tx: Sender<Envelope<T>>) -> Result<(), ()> {
-        if self.map.contains_key(&pid) {
-            return Err(());
-        }
-        self.map.insert(pid, Entry::new_service(tx)).unwrap();
-        Ok(())
+        // We need to ensure the key doesn't exist before inserting it.
+        // We don't use `insert`, because we don't want to replace any existing keys. We can't just
+        // call `self.map.contains_key(&pid)` because after that call the lock is not held and
+        // another key can insert into the map.
+        // Therefore we upsert and then check to see the same value exists as we tried to insert.
+        // That way we can return an error if we tried to insert but a key already existed.
+        let new_id = self.counter.fetch_add(1, Ordering::SeqCst);
+        self.map.upsert(pid.clone(), || Entry::new_service(new_id, tx), |_| {});
+        self.map.get(&pid).map_or(Err(()), |entry| {
+            match *entry {
+                Entry::Process {..} => Err(()),
+                Entry::Service { id, ..} => {
+                    if id == new_id {
+                        return Ok(());
+                    }
+                    Err(())
+                }
+            }
+        })
     }
 
     /// Send an envelope to a process or service at the given pid
@@ -133,7 +170,7 @@ impl<T> Processes<T> {
         let result = match self.map.get_mut(&envelope.to) {
             Some(mut entry) => {
                 match *entry {
-                    Entry::Process { ref mut pcb, ref mut mailbox } => {
+                    Entry::Process { ref mut pcb, ref mut mailbox, ..} => {
                         if let Some(mut pcb) = pcb.take() {
                             // The process is not scheduled, so push envelope onto the pcb mailbox
                             // and add it to the shared deque so a scheduler can steal it.
@@ -146,7 +183,7 @@ impl<T> Processes<T> {
                         }
                         Ok(())
                     }
-                    Entry::Service { ref tx } => {
+                    Entry::Service { ref tx, .. } => {
                         tx.send(envelope).map_err(|e| {
                             if let ChannelError::SendError(mpsc::SendError(envelope)) = e {
                                 return envelope;
@@ -166,16 +203,22 @@ impl<T> Processes<T> {
 
     /// Attempt to deschedule a process
     ///
-    /// If the map entry mailbox contains envelopes then swap it with the Pcb mailbox and return
-    /// the Pcb to the caller, as it should remain on the runqueue of the scheduler.
+    /// If the map entry mailbox contains envelopes then swap it with the `scheduled_pcb` mailbox
+    /// and return the `scheduled_pcb` to the caller, as it should remain on the runqueue of the
+    /// scheduler. The scheduler will only attempt to deschedule processes with no messages in the
+    /// Pcb mailbox.
     ///
-    /// If the entry mailbox is empty, put the Pcb into the entry and return `None`.
+    /// If the entry mailbox is empty, put `scheduled_pcb` into the entry and return `None`.
     ///
-    /// If the entry no longer exists, it means the process was killed. In that case drop the Pcb
-    /// and return `None`.
+    /// If the entry no longer exists, or the id of the entry differs from that of `scheduled_pcb`,
+    /// it means the process was killed. In that case drop `scheduled_pcb` and return `None`.
     pub fn deschedule(&mut self, mut scheduled_pcb: Pcb<T>) -> Option<Pcb<T>> {
         self.map.get_mut(&scheduled_pcb.pid).and_then(|mut entry| {
-            if let Entry::Process {ref mut pcb, ref mut mailbox} = *entry {
+            if let Entry::Process {id, ref mut pcb, ref mut mailbox} = *entry {
+                if scheduled_pcb.id != id {
+                    // This process was already killed and replaced, so drop scheduled_pcb
+                    return None;
+                }
                 if mailbox.is_empty() {
                     *pcb = Some(scheduled_pcb);
                     return None;
