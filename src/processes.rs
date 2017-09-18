@@ -121,6 +121,11 @@ impl<T> Processes<T> {
         })
     }
 
+    /// Remove a process from the map
+    pub fn kill(&self, pid: &Pid) {
+        self.map.remove(pid);
+    }
+
     /// Register the sender for a service so messages can be sent to it
     ///
     /// This should only be called once for a service.
@@ -145,6 +150,11 @@ impl<T> Processes<T> {
                 }
             }
         })
+    }
+
+    /// Remove the service's sender from the map
+    pub fn deregister_service(&self, pid: &Pid) {
+        self.map.remove(pid);
     }
 
     /// Send an envelope to a process or service at the given pid
