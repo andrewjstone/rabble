@@ -138,5 +138,7 @@ pub fn rouse<'de, T>(node_id: NodeId, logger: Option<slog::Logger>) -> (Node<T>,
         }
     }).unwrap();
 
-    (Node::new(node_id, exec_tx, cluster_tx, logger), vec![h1, h2, h3])
+    let processes = Processes::new();
+
+    (Node::new(node_id, processes, exec_tx, cluster_tx, logger), vec![h1, h2, h3])
 }

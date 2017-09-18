@@ -137,7 +137,7 @@ impl<'de, C, S> TcpServerHandler<C, S>
 
     fn handle_connection_notification(&mut self,
                                       notification: &Notification,
-                                      node: &Node<C::Msg>) -> Result<()>
+                                      node: &mut Node<C::Msg>) -> Result<()>
     {
         if let Some(connection) = self.connections.get_mut(&notification.id) {
             if notification.event.writable() {
@@ -167,7 +167,7 @@ impl<'de, C, S> TcpServerHandler<C, S>
     }
 
     /// Handle request timer events and see if any requests have timed out.
-    fn request_tick(&mut self, node: &Node<C::Msg>) -> Result<()>{
+    fn request_tick(&mut self, node: &mut Node<C::Msg>) -> Result<()>{
         for correlation_id in self.request_timer_wheel.expire() {
             let conn_id = correlation_id.connection.as_ref().unwrap();
             if let Some(connection) = self.connections.get_mut(&(*conn_id as usize)) {
@@ -217,7 +217,7 @@ impl<'de, C, S> ServiceHandler<C::Msg> for TcpServerHandler<C, S>
 
     /// Handle any poll notifications
     fn handle_notification(&mut self,
-                           node: &Node<C::Msg>,
+                           node: &mut Node<C::Msg>,
                            notification: Notification,
                            registrar: &Registrar) -> Result<()>
     {
@@ -226,7 +226,7 @@ impl<'de, C, S> ServiceHandler<C::Msg> for TcpServerHandler<C, S>
         }
 
         if notification.id == self.request_timer_id {
-            return self.request_tick(&node);
+            return self.request_tick(node);
         }
 
         if self.connection_timer_id.is_some()
@@ -236,7 +236,7 @@ impl<'de, C, S> ServiceHandler<C::Msg> for TcpServerHandler<C, S>
             return Ok(());
         }
 
-        if let Err(e) = self.handle_connection_notification(&notification, &node) {
+        if let Err(e) = self.handle_connection_notification(&notification, node) {
             // Unwrap is correct here since the above call only fails if the connection exists
             let connection = self.connections.remove(&notification.id).unwrap();
             let _ = registrar.deregister(&connection.sock);
@@ -249,7 +249,7 @@ impl<'de, C, S> ServiceHandler<C::Msg> for TcpServerHandler<C, S>
 
     /// Handle an envelope from a process or service
     fn handle_envelope(&mut self,
-                       node: &Node<C::Msg>,
+                       node: &mut Node<C::Msg>,
                        envelope: Envelope<C::Msg>,
                        _registrar: &Registrar) -> Result<()>
     {
@@ -275,7 +275,7 @@ impl<'de, C, S> ServiceHandler<C::Msg> for TcpServerHandler<C, S>
 /// Handle any readable notifications.
 fn handle_readable<'de, C, S>(connection: &mut Connection<C, S>,
                       request_timer_wheel: &mut TimerWheel<CorrelationId>,
-                      node: &Node<C::Msg>,
+                      node: &mut Node<C::Msg>,
                       output: &mut Vec<ConnectionMsg<C>>) -> Result<()>
     where C: ConnectionHandler<ClientMsg=S::Msg>,
           S: Serialize,
@@ -311,7 +311,7 @@ fn handle_connection_msgs<'de, C, S>(request_timer_wheel: &mut TimerWheel<Correl
                              msgs: &mut Vec<ConnectionMsg<C>>,
                              serializer: &mut S,
                              sock: &mut TcpStream,
-                             node: &Node<C::Msg>) -> Result<()>
+                             node: &mut Node<C::Msg>) -> Result<()>
     where C: ConnectionHandler<ClientMsg=S::Msg>,
           S: Serialize,
           C::Msg: serde::Serialize + serde::Deserialize<'de> + Clone + Debug

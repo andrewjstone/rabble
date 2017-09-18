@@ -12,6 +12,7 @@ use envelope::Envelope;
 use histogram::Histogram;
 
 const INITIAL_MAILBOX_CAPACITY: usize = 16;
+const INITIAL_DEQUE_CAPACITY: usize = 128;
 
 /// A Process Control Block
 ///
@@ -79,20 +80,24 @@ impl<T> Entry<T> {
 /// mailbox is empty the process is descheduled. The scheduler may choose to keep the process local
 /// temporarily to improve cache locality, but after a period of time it will be put back on the map
 /// if it hasn't received any messages.
-///
+#[derive(Clone)]
 pub struct Processes<T> {
-    counter: AtomicUsize,
-    map: CHashMap<Pid, Entry<T>>,
+    counter: Arc<AtomicUsize>,
+    map: Arc<CHashMap<Pid, Entry<T>>>,
     deque: Option<Arc<Mutex<VecDeque<Pcb<T>>>>>,
 }
 
 impl<T> Processes<T> {
-    pub fn new(deque: Arc<Mutex<VecDeque<Pcb<T>>>>) -> Processes<T> {
+    pub fn new() -> Processes<T> {
         Processes {
-            counter: AtomicUsize::new(0),
-            map: CHashMap::with_capacity(1024),
-            deque: Some(deque)
+            counter: Arc::new(AtomicUsize::new(0)),
+            map: Arc::new(CHashMap::with_capacity(1024)),
+            deque: Some(Arc::new(Mutex::new(VecDeque::with_capacity(INITIAL_DEQUE_CAPACITY))))
         }
+    }
+
+    pub fn clone_deque(&self) -> Arc<Mutex<VecDeque<Pcb<T>>>> {
+        self.deque.clone().unwrap()
     }
 
     /// Create a process control structure for the process and store it in the processes map
@@ -290,8 +295,8 @@ mod tests {
 
     #[test]
     fn process_lifecycle() {
-        let deque = Arc::new(Mutex::new(VecDeque::new()));
-        let mut processes = Processes::new(deque.clone());
+        let mut processes = Processes::new();
+        let mut deque = processes.clone_deque();
         let pid1 = pid("pid1");
         processes.spawn(pid1.clone(), Box::new(TestProcess) as Box<Process<()>>).unwrap();
 

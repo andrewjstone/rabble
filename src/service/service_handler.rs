@@ -18,12 +18,12 @@ pub trait ServiceHandler<T> {
 
     /// Some handler don't register anything that requires notification and only receive
     /// envelopes. Those handlers do not need to implement this function.
-    fn handle_notification(&mut self, &Node<T>, Notification, &Registrar) -> Result<()> {
+    fn handle_notification(&mut self, &mut Node<T>, Notification, &Registrar) -> Result<()> {
         // TODO: Log message
         Ok(())
     }
 
     /// Handle any envelopes addressed to the service's Pid. All handlers must implement
     /// this function.
-    fn handle_envelope(&mut self, &Node<T>, Envelope<T>, &Registrar) -> Result<()>;
+    fn handle_envelope(&mut self, &mut Node<T>, Envelope<T>, &Registrar) -> Result<()>;
 }

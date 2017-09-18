@@ -32,7 +32,7 @@ impl<'de, T, H> Service<T, H>
         let poller = Poller::new().unwrap();
         let mut registrar = poller.get_registrar()?;
         let (tx, rx) = registrar.channel()?;
-        node.register_service(&pid, &tx)?;
+        node.register_service(pid.clone(), tx.try_clone().unwrap())?;
         handler.init(&registrar, &node)?;
         let logger = node.logger.new(o!("component" => "service", "pid" => pid.to_string()));
         Ok(Service {
@@ -63,7 +63,7 @@ impl<'de, T, H> Service<T, H>
                                "error" => e.to_string())
                     }
                 } else {
-                    if let Err(e) = self.handler.handle_notification(&self.node,
+                    if let Err(e) = self.handler.handle_notification(&mut self.node,
                                                                      notification,
                                                                      &self.registrar) {
                         warn!(self.logger,
@@ -80,7 +80,7 @@ impl<'de, T, H> Service<T, H>
             if let Msg::Shutdown = envelope.msg {
                 return Err(ErrorKind::Shutdown(self.pid.clone()).into());
             }
-            try!(self.handler.handle_envelope(&self.node, envelope, &self.registrar));
+            try!(self.handler.handle_envelope(&mut self.node, envelope, &self.registrar));
         }
         Ok(())
     }

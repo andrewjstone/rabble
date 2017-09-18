@@ -1,6 +1,9 @@
+use std;
 use std::sync::mpsc::Sender;
 use std::fmt::Debug;
 use serde::{Serialize, Deserialize};
+use amy;
+use slog;
 use node_id::NodeId;
 use executor::ExecutorMsg;
 use cluster::ClusterMsg;
@@ -8,9 +11,8 @@ use pid::Pid;
 use correlation_id::CorrelationId;
 use process::Process;
 use envelope::Envelope;
-use amy;
 use errors::*;
-use slog;
+use processes::Processes;
 
 macro_rules! send {
     ($s:ident.$t:ident, $msg:expr, $pid:expr, $errmsg:expr) => {
@@ -30,6 +32,7 @@ macro_rules! send {
 pub struct Node<T> {
     pub id: NodeId,
     pub logger: slog::Logger,
+    processes: Processes<T>,
     executor_tx: Sender<ExecutorMsg<T>>,
     cluster_tx: Sender<ClusterMsg<T>>
 }
@@ -38,11 +41,13 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> Node<T> {
     /// Create a new node. This function should not be called by the user directly. It is called by
     /// by the user call to `rabble::rouse(..)` that initializes a rabble system for a single node.
     pub fn new(id: NodeId,
+               processes: Processes<T>,
                executor_tx: Sender<ExecutorMsg<T>>,
                cluster_tx: Sender<ClusterMsg<T>>,
                logger: slog::Logger) -> Node<T> {
         Node {
             id: id,
+            processes: processes,
             executor_tx: executor_tx,
             cluster_tx: cluster_tx,
             logger: logger
@@ -72,38 +77,28 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> Node<T> {
     }
 
     /// Add a process to the executor that can be sent Envelopes addressed to its pid
-    pub fn spawn(&self, pid: &Pid, process: Box<Process<T>>) -> Result<()> {
-        send!(self.executor_tx,
-              ExecutorMsg::Start(pid.clone(), process),
-              Some(pid.clone()),
-              format!("ExecutorMsg::Start({}, ..)", pid))
+    pub fn spawn(&self, pid: Pid, process: Box<Process<T>>) -> Result<()> {
+        self.processes.spawn(pid, process).map_err(|_| "Failed to spawn process".into())
     }
 
     /// Remove a process from the executor
     pub fn stop(&self, pid: &Pid) -> Result<()> {
-        send!(self.executor_tx,
-              ExecutorMsg::Stop(pid.clone()),
-              Some(pid.clone()),
-              format!("ExecutorMsg::Start({}, ..)", pid))
+        self.processes.kill(pid);
+        Ok(())
     }
 
     /// Register a Service's sender with the executor so that it can be sent messages addressed to
     /// its pid
-    pub fn register_service(&self, pid: &Pid, tx: &amy::Sender<Envelope<T>>) -> Result<()>
+    pub fn register_service(&self, pid: Pid, tx: amy::Sender<Envelope<T>>) -> Result<()>
     {
-        send!(self.executor_tx,
-              ExecutorMsg::RegisterService(pid.clone(), tx.try_clone()?),
-              Some(pid.clone()),
-              format!("ExecutorMsg::RegisterService({}, ..)", pid))
+        self.processes.register_service(pid, tx).map_err(|_| "Failed to register service".into())
     }
 
     /// Send an envelope to the executor so it gets routed to the appropriate process or service
-    pub fn send(&self, envelope: Envelope<T>) -> Result<()> {
-        let to = envelope.to.clone();
-        send!(self.executor_tx,
-              ExecutorMsg::Envelope(envelope),
-              Some(to),
-              "ExecutorMsg::Envelope(envelope)".to_string())
+    ///
+    /// Return the envelope if the send fails.
+    pub fn send(&mut self, envelope: Envelope<T>) -> std::result::Result<(), Envelope<T>> {
+        self.processes.send(envelope)
     }
 
     /// Get the status of the executor
