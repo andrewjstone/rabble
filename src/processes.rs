@@ -21,16 +21,16 @@ pub struct Pcb<T> {
     /// This is to prevent race conditions where an old Pcb is attempted to be descheduled onto
     /// newer process, such as could happen if the old process was killed and a new one was added,
     /// but the scheduler hadn't yet attempted to deschedule the old one.
-    id: usize,
-    pid: Pid,
-    process: Box<Process<T>>,
-    mailbox: Vec<Envelope<T>>,
-    total_msgs: u64,
-    total_runtime: Duration,
+    pub id: usize,
+    pub pid: Pid,
+    pub process: Box<Process<T>>,
+    pub mailbox: Vec<Envelope<T>>,
+    pub total_msgs: u64,
+    pub total_runtime: Duration,
     /// The runtime of the process at a scheduler before being descheduled
-    runtime_hist: Histogram,
+    pub runtime_hist: Histogram,
     /// The number of msgs executed at a time by the scheduler, before descheduling
-    msg_hist: Histogram
+    pub msg_hist: Histogram
 }
 
 impl<T> Pcb<T> {
@@ -245,6 +245,7 @@ impl<T> Processes<T> {
     }
 }
 
+#[cfg(test)]
 mod tests {
 
     use std::collections::VecDeque;
