@@ -47,6 +47,7 @@ mod service;
 mod correlation_id;
 mod histogram;
 mod processes;
+mod scheduler;
 
 pub mod serialize;
 
