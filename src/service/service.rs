@@ -10,7 +10,7 @@ use slog;
 use super::ServiceHandler;
 
 /// A system service that operates on a single thread. A service is registered via its pid
-/// with the executor and can send and receive messages to processes as well as other services.
+/// with the node and can send and receive messages to processes as well as other services.
 pub struct Service<T, H> {
     pub pid: Pid,
     pub tx: amy::Sender<Envelope<T>>,

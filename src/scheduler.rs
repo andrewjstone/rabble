@@ -1,7 +1,7 @@
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 use std::collections::VecDeque;
-use parking_lot::Mutex;
+use parking_lot::{Mutex, Condvar};
 use coco::deque;
 use pid::Pid;
 use envelope::Envelope;
@@ -13,8 +13,9 @@ const ALLOW_STEAL_MIN_MESSAGES: u64 = 10*1024;
 ///
 /// Schedulers start in an empty state with no processes allocated to them. When a message is sent
 /// to a process, via the `Processes` object, the process control block (`Pcb`) containing the
-/// process is placed on a deque. An available scheduler will pull from the deque and put the Pcb on
-/// its run queue. When it is time to execute the process (i.e. handle messages in its mailbox) it
+/// process is placed on a deque.An available scheduler will pull from the deque and put the Pcb on
+/// // // we can learn the new config. We can then announce the reconfiguration to the namespace manager, and restart the recovery process with that config.
+/// it//s run queue. When it is time to execute the process (i.e. handle messages in its mailbox) it
 /// will handle a subset of messages due to scheduler policy, then put the Pcb on the back of the
 /// run queue.
 ///
@@ -48,10 +49,11 @@ pub struct Scheduler<T> {
     /// The global process map shared among all schedulers and other senders
     processes: Processes<T>,
 
-    /// Processes get put on this queue when they first receive a message.
-    /// A scheduler will select a process, put it on the run_queue, and continue processing it until
-    /// it runs out of messages or another scheduler steals it.
-    unscheduled: Arc<Mutex<VecDeque<Pcb<T>>>>,
+    /// Processes get put on the queue in the first element of this pair when they first receive a
+    /// message.  A scheduler will select a process, put it on the run_queue, and continue
+    /// processing it until it runs out of messages or another scheduler steals it. The Condvar is
+    /// used to wake up sleeping scheduler threads that have no work to do.
+    unscheduled: Arc<(Mutex<VecDeque<Pcb<T>>>, Condvar)>,
 
     /// The number of messages handled by this scheduler for its entire lifetime
     total_msgs: u64,
@@ -166,17 +168,18 @@ impl<T> Scheduler<T> {
 
             // If there is no more work to do then go to sleep
             if self.run_queue.len() == 0 {
-                // TODO: Wait on a condition variable that gets signalled when a process gets pushed
-                // on the `unscheduled` deque. We may also want to consider waiting on a scheduler
-                // to signal when it's outstanding work has crossed some threshold. Therefore, awake
-                // schedulers would take off the unscheduled queue and only wake up sleeping
-                // schedulers when they become overloaded.
+                // TODO:  We may want to consider waiting on a scheduler to signal when it's
+                // outstanding work has crossed some threshold. Therefore, awake schedulers would
+                // take off the unscheduled queue and only wake up sleeping schedulers when they
+                // become overloaded.
+                let mut deque = self.unscheduled.0.lock();
+                self.unscheduled.1.wait(&mut deque);
             }
         }
     }
 
     fn take_unscheduled(&mut self) -> Option<Pcb<T>> {
-        let mut unscheduled = self.unscheduled.lock();
+        let mut unscheduled = self.unscheduled.0.lock();
         (*unscheduled).pop_front()
     }
 }

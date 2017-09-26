@@ -5,7 +5,6 @@ use serde::{Serialize, Deserialize};
 use amy;
 use slog;
 use node_id::NodeId;
-use executor::ExecutorMsg;
 use cluster::ClusterMsg;
 use pid::Pid;
 use correlation_id::CorrelationId;
@@ -33,7 +32,6 @@ pub struct Node<T> {
     pub id: NodeId,
     pub logger: slog::Logger,
     processes: Processes<T>,
-    executor_tx: Sender<ExecutorMsg<T>>,
     cluster_tx: Sender<ClusterMsg<T>>
 }
 
@@ -42,13 +40,11 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> Node<T> {
     /// by the user call to `rabble::rouse(..)` that initializes a rabble system for a single node.
     pub fn new(id: NodeId,
                processes: Processes<T>,
-               executor_tx: Sender<ExecutorMsg<T>>,
                cluster_tx: Sender<ClusterMsg<T>>,
                logger: slog::Logger) -> Node<T> {
         Node {
             id: id,
             processes: processes,
-            executor_tx: executor_tx,
             cluster_tx: cluster_tx,
             logger: logger
         }
@@ -76,38 +72,29 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> Node<T> {
               format!("ClusterMsg::Leave({:?})", *node_id))
     }
 
-    /// Add a process to the executor that can be sent Envelopes addressed to its pid
+    /// Add a process to the processes map that can be sent Envelopes addressed to its pid
     pub fn spawn(&self, pid: Pid, process: Box<Process<T>>) -> Result<()> {
         self.processes.spawn(pid, process).map_err(|_| "Failed to spawn process".into())
     }
 
-    /// Remove a process from the executor
+    /// Remove a process from the processes map
     pub fn stop(&self, pid: &Pid) -> Result<()> {
         self.processes.kill(pid);
         Ok(())
     }
 
-    /// Register a Service's sender with the executor so that it can be sent messages addressed to
+    /// Register a Service's sender with the processes map so that it can be sent messages addressed to
     /// its pid
     pub fn register_service(&self, pid: Pid, tx: amy::Sender<Envelope<T>>) -> Result<()>
     {
         self.processes.register_service(pid, tx).map_err(|_| "Failed to register service".into())
     }
 
-    /// Send an envelope to the executor so it gets routed to the appropriate process or service
+    /// Send an envelope to the processes map so it gets routed to the appropriate process or service
     ///
     /// Return the envelope if the send fails.
     pub fn send(&mut self, envelope: Envelope<T>) -> std::result::Result<(), Envelope<T>> {
         self.processes.send(envelope)
-    }
-
-    /// Get the status of the executor
-    pub fn executor_status(&self, correlation_id: CorrelationId) -> Result<()> {
-        let to = correlation_id.pid.clone();
-        send!(self.executor_tx,
-              ExecutorMsg::GetStatus(correlation_id),
-              Some(to),
-              "ExecutorMsg::GetStatus".to_string())
     }
 
     /// Get the status of the cluster server
@@ -121,7 +108,6 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> Node<T> {
 
     /// Shutdown the node
     pub fn shutdown(&self) {
-        self.executor_tx.send(ExecutorMsg::Shutdown).unwrap();
         self.cluster_tx.send(ClusterMsg::Shutdown).unwrap();
     }
 }

@@ -3,7 +3,7 @@ use msg::Msg;
 use envelope::Envelope;
 use correlation_id::CorrelationId;
 
-pub trait Process<T> : Send {
+pub trait Process<T> : Send + Sync {
     /// Initialize process state if necessary
     fn init(&mut self, _executor_pid: Pid) -> Vec<Envelope<T>> {
         Vec::new()

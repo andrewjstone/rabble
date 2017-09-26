@@ -3,7 +3,7 @@ use std::time::Duration;
 use std::collections::VecDeque;
 use std::sync::{mpsc, Arc};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use parking_lot::Mutex;
+use parking_lot::{Mutex, Condvar};
 use chashmap::CHashMap;
 use amy::{Sender, ChannelError};
 use pid::Pid;
@@ -52,7 +52,12 @@ impl<T> Pcb<T> {
 /// An entry in the Processes map
 pub enum Entry<T> {
     Process { id: usize, pcb: Option<Pcb<T>>, mailbox: Vec<Envelope<T>> },
-    Service { id: usize, tx: Sender<Envelope<T>> }
+    // Senders are Send, but not Sync. Unfortunately this requires wrapping a non-blocking channel
+    // in a muted :(
+    // TODO: Either send all service messages to a single routing thread over a channel that is not
+    // stored in an entry so that we don't require a mutex,  or use a type of sender that is sync in
+    // the first place.
+    Service { id: usize, tx: Arc<Mutex<Sender<Envelope<T>>>> }
 }
 
 impl<T> Entry<T> {
@@ -65,14 +70,14 @@ impl<T> Entry<T> {
     }
 
     pub fn new_service(id: usize, tx: Sender<Envelope<T>>) -> Entry<T> {
-        Entry::Service { id: id, tx: tx }
+        Entry::Service { id: id, tx: Arc::new(Mutex::new(tx)) }
     }
 }
 
 /// A global concurrent hashmap that stores processes and mailboxes and allows sending
 /// messages to local processes.
 ///
-/// This hashmap is primarily used to send messages. When a process is present in the map and a
+/// This hashmap is primarily used to send messages. When a process ispresent in the map and a
 /// message gets put in its mailbox it is put on a shared work-stealing deque to be picked up by a
 /// scheduler. New messages destined for a process that is either in flight or claimed by a
 /// scheduler are placed in a mailbox stored in the map. When the scheduled process exhausts its
@@ -84,7 +89,7 @@ impl<T> Entry<T> {
 pub struct Processes<T> {
     counter: Arc<AtomicUsize>,
     map: Arc<CHashMap<Pid, Entry<T>>>,
-    deque: Option<Arc<Mutex<VecDeque<Pcb<T>>>>>,
+    deque: Option<Arc<(Mutex<VecDeque<Pcb<T>>>, Condvar)>>,
 }
 
 impl<T> Processes<T> {
@@ -92,11 +97,14 @@ impl<T> Processes<T> {
         Processes {
             counter: Arc::new(AtomicUsize::new(0)),
             map: Arc::new(CHashMap::with_capacity(1024)),
-            deque: Some(Arc::new(Mutex::new(VecDeque::with_capacity(INITIAL_DEQUE_CAPACITY))))
+            deque: Some(Arc::new((Mutex::new(VecDeque::with_capacity(INITIAL_DEQUE_CAPACITY)),
+                                  Condvar::new())))
         }
     }
 
-    pub fn clone_deque(&self) -> Arc<Mutex<VecDeque<Pcb<T>>>> {
+    /// Return a cloned deque and its associated condvar that gets notified when a process is
+    /// scheduled.
+    pub fn clone_deque(&self) -> Arc<(Mutex<VecDeque<Pcb<T>>>, Condvar)> {
         self.deque.clone().unwrap()
     }
 
@@ -190,8 +198,9 @@ impl<T> Processes<T> {
                             // The process is not scheduled, so push envelope onto the pcb mailbox
                             // and add it to the shared deque so a scheduler can steal it.
                             pcb.mailbox.push(envelope);
-                            let mut deque = deque.lock();
-                            (*deque).push_back(pcb)
+                            let mut _deque = deque.0.lock();
+                            (*_deque).push_back(pcb);
+                            deque.1.notify_one();
                         } else {
                             // The process is already scheduled, push envelope onto the entry mailbox
                             mailbox.push(envelope);
@@ -199,6 +208,7 @@ impl<T> Processes<T> {
                         Ok(())
                     }
                     Entry::Service { ref tx, .. } => {
+                        let tx = tx.lock();
                         tx.send(envelope).map_err(|e| {
                             if let ChannelError::SendError(mpsc::SendError(envelope)) = e {
                                 return envelope;
@@ -211,7 +221,7 @@ impl<T> Processes<T> {
             None => Err(envelope)
         };
 
-        // Restore the temporarily removed deque
+        // Restore the temporarily removed deque/condvar pair
         self.deque = Some(deque);
         result
     }
@@ -311,7 +321,7 @@ mod tests {
         // its mailbox
         let mut pcb = {
             // The extra scope is to ensure the deque goes out of scope and gets unlocked
-            let mut deque = deque.lock();
+            let mut deque = deque.0.lock();
             let pcb = (*deque).pop_back().unwrap();
             assert_eq!(pcb.mailbox.len(), 1);
             pcb
@@ -321,7 +331,7 @@ mod tests {
         // the pcb and the deque is still empty.
         {
             processes.send(envelope()).unwrap();
-            let mut deque = deque.lock();
+            let mut deque = deque.0.lock();
             assert_eq!((*deque).len(), 0);
             assert_eq!(pcb.mailbox.len(), 1);
         }
