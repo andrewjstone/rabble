@@ -23,6 +23,8 @@ extern crate parking_lot;
 #[macro_use]
 extern crate slog;
 extern crate slog_stdlog;
+extern crate slog_term;
+extern crate slog_async;
 
 extern crate serde;
 extern crate serde_bytes;
@@ -81,7 +83,7 @@ use std::sync::mpsc::channel;
 use std::fmt::Debug;
 use serde::{Deserialize, Serialize};
 use amy::Poller;
-use slog::DrainExt;
+use slog::Drain;
 use cluster::ClusterMsg;
 use scheduler::Scheduler;
 
@@ -96,19 +98,15 @@ pub fn rouse<'de, T>(node_id: NodeId, logger: Option<slog::Logger>) -> (Node<T>,
 {
     let logger = match logger {
         Some(logger) => logger.new(o!("node_id" => node_id.to_string())),
-        None => slog::Logger::root(slog_stdlog::StdLog.fuse(), o!("node_id" => node_id.to_string()))
+        None => {
+            let decorator = slog_term::PlainSyncDecorator::new(std::io::stdout());
+            let drain = slog_term::CompactFormat::new(decorator).build().fuse();
+            let drain = slog_async::Async::new(drain).build().fuse();
+            slog::Logger::root(drain, o!("node_id" => node_id.to_string()))
+        }
     };
 
-    let processes = Processes::new();
-
-    // Just launch a single scheduler for now.
-    // TODO: Make this configurable.
-    let scheduler_pid = Pid { name: "scheduler1".to_owned(), group: None, node: node_id.clone() };
-    let scheduler = Scheduler::new(scheduler_pid, processes.clone());
-
-    let h0 = thread::Builder::new().name(format!("scheduler1::{}", node_id)).spawn(move || {
-        scheduler.run()
-    }).unwrap();
+    let processes = Processes::new(logger.clone());
 
 
     let mut poller = Poller::new().unwrap();
@@ -118,6 +116,15 @@ pub fn rouse<'de, T>(node_id: NodeId, logger: Option<slog::Logger>) -> (Node<T>,
                                             cluster_rx,
                                             poller.get_registrar().unwrap(),
                                             logger.clone());
+
+    // Just launch a single scheduler for now.
+    // TODO: Make this configurable.
+    let scheduler_pid = Pid { name: "scheduler1".to_owned(), group: None, node: node_id.clone() };
+    let scheduler = Scheduler::new(scheduler_pid, processes.clone(), cluster_tx.clone(), logger.clone());
+
+    let h0 = thread::Builder::new().name(format!("scheduler1::{}", node_id)).spawn(move || {
+        scheduler.run()
+    }).unwrap();
 
     let h1 = thread::Builder::new().name(format!("cluster_server::{}", node_id)).spawn(move || {
         cluster_server.run()

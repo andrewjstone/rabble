@@ -60,7 +60,7 @@ fn chain_replication() {
     let mut poller = Poller::new().unwrap();
     let (test_tx, test_rx) = poller.get_registrar().unwrap().channel().unwrap();
 
-    register_test_as_service(&mut poller, &nodes, &test_tx, &test_rx);
+    register_test_as_service(&mut poller, &nodes, test_tx, &test_rx);
 
     let pids = create_replica_pids(&nodes);
 
@@ -92,7 +92,7 @@ fn spawn_replicas(nodes: &Vec<CrNode>, pids: &Vec<Pid>) {
             Some(pids[i + 1].clone())
         };
         let replica = Box::new(Replica::new(pids[i].clone(), next));
-        nodes[i].spawn(&pids[i], replica).unwrap();
+        nodes[i].spawn(pids[i].clone(), replica).unwrap();
     }
 }
 

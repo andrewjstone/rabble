@@ -61,7 +61,7 @@ fn connection_timeout() {
     }
 }
 
-struct TestProcess {
+/*struct TestProcess {
     pid: Pid,
     executor_pid: Option<Pid>,
 
@@ -124,6 +124,7 @@ fn process_timeout() {
         h.join().unwrap();
     }
 }
+*/
 
 fn run_client_operation_against_nonexistant_pid_and_wait_for_timeout(node_id: NodeId) {
     let pid = Pid {name: "fake-pid".to_string(), group: None, node: node_id};

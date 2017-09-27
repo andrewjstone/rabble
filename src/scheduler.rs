@@ -1,11 +1,14 @@
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
+use std::sync::mpsc::Sender;
 use std::collections::VecDeque;
 use parking_lot::{Mutex, Condvar};
 use coco::deque;
+use slog::Logger;
 use pid::Pid;
 use envelope::Envelope;
 use processes::{Processes, Pcb};
+use cluster::ClusterMsg;
 
 const ALLOW_STEAL_MIN_MESSAGES: u64 = 10*1024;
 
@@ -49,6 +52,9 @@ pub struct Scheduler<T> {
     /// The global process map shared among all schedulers and other senders
     processes: Processes<T>,
 
+    /// Channel to the Cluster Server used for sending envelopes to other nodes
+    cluster_tx: Sender<ClusterMsg<T>>,
+
     /// Processes get put on the queue in the first element of this pair when they first receive a
     /// message.  A scheduler will select a process, put it on the run_queue, and continue
     /// processing it until it runs out of messages or another scheduler steals it. The Condvar is
@@ -71,24 +77,34 @@ pub struct Scheduler<T> {
     peers: Vec<(Pid, deque::Stealer<Pcb<T>>)>,
 
     /// The index of the last stolen peer. We steal in a round robin fashion.
-    last_stolen: usize
+    last_stolen: usize,
+
+    /// The system logger
+    logger: Logger
 }
 
 impl<T> Scheduler<T> {
     /// Create a new scheduler
-    pub fn new(pid: Pid, processes: Processes<T>) -> Scheduler<T> {
+    pub fn new(pid: Pid,
+               processes: Processes<T>,
+               cluster_tx: Sender<ClusterMsg<T>>,
+               logger: Logger) -> Scheduler<T>
+    {
+        let name = pid.name.clone();
         let (worker, stealer) = deque::new();
         let unscheduled = processes.clone_deque();
         Scheduler {
             pid: pid,
             processes: processes,
+            cluster_tx: cluster_tx,
             unscheduled: unscheduled,
             total_msgs: 0,
             msgs_queued: Arc::new(AtomicUsize::new(0)),
             run_queue: worker,
             stealer: stealer,
             peers: Vec::new(),
-            last_stolen: 0
+            last_stolen: 0,
+            logger: logger.new(o!("component" => name))
         }
     }
 
@@ -107,12 +123,18 @@ impl<T> Scheduler<T> {
     ///
     /// This function blocks indefinitely
     pub fn run(mut self) {
+        info!(self.logger, "Starting scheduler");
+
         // Output envelopes from calling a process's handle method get placed here temporarily.
         let mut output = Vec::with_capacity(16);
 
         loop {
             // 1. Check the global deque for any new Pcbs
             if let Some(pcb) = self.take_unscheduled() {
+                trace!(self.logger, "process scheduled";
+                       "id" => pcb.id,
+                       "pid" => pcb.pid.to_string(),
+                       "mailbox_len" => pcb.mailbox.len());
                 self.run_queue.push(pcb)
             }
 
@@ -127,19 +149,44 @@ impl<T> Scheduler<T> {
 
                         // Send any outgoing messages from the currently executing process
                         for envelope in output.drain(..) {
-                            // Drop messages without a receiver
-                            let _ = self.processes.send(envelope);
+                            if envelope.to.node == self.pid.node {
+                                // Drop messages without a receiver
+                                let _ = self.processes.send(envelope);
+                            } else {
+                                if let Err(_) =
+                                    self.cluster_tx.send(ClusterMsg::Envelope(envelope)) {
+                                        // The node is shutting down.
+                                        info!(self.logger, "shutting down");
+                                        return;
+                                }
+                            }
                         }
                     }
 
                     // Attempt to deschedule the process. This will return Some(pcb) if there were
                     // messages waiting in the processes entry mailbox. Those messages will be swapped
                     // into the pcb so that it can be put back on the run_queue.
+                    let id = pcb.id;
+                    let pidstr = pcb.pid.to_string();
+                    let mailbox_len = pcb.mailbox.len();
                     if let Some(pcb) = self.processes.deschedule(pcb) {
+                        trace!(self.logger, "mailbox swapped";
+                               "id" => id,
+                               "pid" => pidstr,
+                               "mailbox_len" => mailbox_len);
                         self.run_queue.push(pcb);
+                    } else {
+                        trace!(self.logger, "process descheduled";
+                               "id" => id,
+                               "pid" => pidstr,
+                               "mailbox_len" => mailbox_len);
                     }
                 }
                 None => {
+                    if self.peers.is_empty() {
+                        // There is only a single scheduler in this system
+                        break;
+                    }
                     // We have no more work to do. Attempt to steal a pcb
                     let start = self.last_stolen + 1;
                     let mut current = start;
@@ -153,11 +200,17 @@ impl<T> Scheduler<T> {
                             None => {
                                 current = (current + 1) % self.peers.len();
                                 if current == start {
+                                    trace!(self.logger, "No processes to steal");
+
                                     // We have wrapped around
                                     break;
                                 }
                             }
                             Some(pcb) => {
+                                trace!(self.logger, "process stolen";
+                                       "id" => pcb.id,
+                                       "pid" => pcb.pid.to_string(),
+                                       "mailbox_len" => pcb.mailbox.len());
                                 self.run_queue.push(pcb);
                                 break;
                             }
@@ -172,6 +225,7 @@ impl<T> Scheduler<T> {
                 // outstanding work has crossed some threshold. Therefore, awake schedulers would
                 // take off the unscheduled queue and only wake up sleeping schedulers when they
                 // become overloaded.
+                info!(self.logger, "Scheduler sleeping");
                 let mut deque = self.unscheduled.0.lock();
                 self.unscheduled.1.wait(&mut deque);
             }

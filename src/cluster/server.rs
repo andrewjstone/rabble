@@ -104,7 +104,7 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
     }
 
     pub fn run(mut self) {
-        info!(self.logger, "Starting");
+        info!(self.logger, "Starting\n");
         self.timer_id = self.registrar.set_interval(TICK_TIME).unwrap();
         self.listener_id = self.registrar.register(&self.listener, Event::Read).unwrap();
         while let Ok(msg) = self.rx.recv() {
@@ -116,16 +116,16 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
                 match *e.kind() {
                     ErrorKind::EncodeError(..) | ErrorKind::DecodeError(..) |
                     ErrorKind::RegistrarError(..) | ErrorKind::SendError(..) => {
-                        error!(self.logger, e.to_string());
+                        error!(self.logger, "{}\n", e);
                         break;
                     }
 
                     ErrorKind::Shutdown(..) => {
-                        info!(self.logger, e.to_string());
+                        info!(self.logger, "{}\n", e);
                         break;
                     },
 
-                    _ => warn!(self.logger, e.to_string())
+                    _ => warn!(self.logger, "{}\n", e)
                 }
             }
         }
@@ -537,7 +537,7 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
         for node in to_connect {
             self.metrics.connection_attempts += 1;
             if let Err(e) = self.connect(node) {
-                warn!(self.logger, e.to_string());
+                warn!(self.logger, "{}", e);
             }
         }
 

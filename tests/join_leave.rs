@@ -51,7 +51,7 @@ fn join_leave() {
     let mut poller = Poller::new().unwrap();
     let (test_tx, test_rx) = poller.get_registrar().unwrap().channel().unwrap();
 
-    register_test_as_service(&mut poller, &nodes, &test_tx, &test_rx);
+    register_test_as_service(&mut poller, &nodes, test_tx, &test_rx);
 
     // join node1 to node2
     // Wait for the cluster status of both nodes to show they are connected

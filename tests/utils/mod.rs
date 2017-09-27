@@ -1,8 +1,4 @@
 extern crate time;
-extern crate slog;
-extern crate slog_term;
-extern crate slog_envlogger;
-extern crate slog_stdlog;
 
 pub mod replica;
 pub mod api_server;
@@ -11,7 +7,6 @@ pub mod messages;
 use std::thread::{self, JoinHandle};
 use std::net::TcpStream;
 use amy::{Poller, Receiver, Sender};
-use self::slog::DrainExt;
 use self::time::{SteadyTime, Duration};
 use utils::messages::*;
 use rabble::{
@@ -90,14 +85,9 @@ pub fn create_node_ids(n: usize) -> Vec<NodeId> {
 
 #[allow(dead_code)] // Not used in all tests
 pub fn start_nodes(n: usize) -> (Vec<Node<RabbleUserMsg>>, Vec<JoinHandle<()>>) {
-    let term = slog_term::streamer().build();
-    let drain = slog_envlogger::LogBuilder::new(term)
-        .filter(None, slog::FilterLevel::Debug).build();
-    let root_logger = slog::Logger::root(drain.fuse(), None);
-    slog_stdlog::set_logger(root_logger.clone()).unwrap();
     create_node_ids(n).into_iter().fold((Vec::new(), Vec::new()),
                                   |(mut nodes, mut handles), node_id| {
-        let (node, handle_list) = rabble::rouse(node_id, Some(root_logger.clone()));
+        let (node, handle_list) = rabble::rouse(node_id, None);
         nodes.push(node);
         handles.extend(handle_list);
         (nodes, handles)
@@ -116,13 +106,13 @@ pub fn test_pid(node_id: NodeId) -> Pid {
 #[allow(dead_code)] // Not used in all tests
 pub fn register_test_as_service(poller: &mut Poller,
                                 nodes: &Vec<CrNode>,
-                                test_tx: &CrSender,
+                                test_tx: CrSender,
                                 test_rx: &CrReceiver)
 {
     for node in nodes {
         let test_pid = test_pid(node.id.clone());
         let correlation_id = CorrelationId::pid(test_pid.clone());
-        node.register_service(&test_pid, &test_tx).unwrap();
+        node.register_service(test_pid, test_tx.try_clone().unwrap()).unwrap();
         // Wait for registration to succeed
         loop {
             node.cluster_status(correlation_id.clone()).unwrap();

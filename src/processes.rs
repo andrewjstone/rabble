@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use parking_lot::{Mutex, Condvar};
 use chashmap::CHashMap;
 use amy::{Sender, ChannelError};
+use slog::Logger;
 use pid::Pid;
 use process::Process;
 use envelope::Envelope;
@@ -90,15 +91,17 @@ pub struct Processes<T> {
     counter: Arc<AtomicUsize>,
     map: Arc<CHashMap<Pid, Entry<T>>>,
     deque: Option<Arc<(Mutex<VecDeque<Pcb<T>>>, Condvar)>>,
+    logger: Logger
 }
 
 impl<T> Processes<T> {
-    pub fn new() -> Processes<T> {
+    pub fn new(logger: Logger) -> Processes<T> {
         Processes {
             counter: Arc::new(AtomicUsize::new(0)),
             map: Arc::new(CHashMap::with_capacity(1024)),
             deque: Some(Arc::new((Mutex::new(VecDeque::with_capacity(INITIAL_DEQUE_CAPACITY)),
-                                  Condvar::new())))
+                                  Condvar::new()))),
+            logger: logger.new(o!("component" => "Processes"))
         }
     }
 
@@ -125,18 +128,31 @@ impl<T> Processes<T> {
             match *entry {
                 Entry::Process { id, ..} => {
                     if id == new_id {
+                        info!(self.logger, "Spawn process succeded"; "id" => id, "pid" => pid.to_string());
                         return Ok(());
                     }
+                    info!(self.logger, "Spawn process failed"; "id" => id, "pid" => pid.to_string());
                     Err(())
                 }
-                Entry::Service {..} => Err(())
+                Entry::Service {id, ..} => {
+                    info!(self.logger, "Spawn process failed"; "id" => id, "pid" => pid.to_string());
+                    Err(())
+                }
             }
         })
     }
 
     /// Remove a process from the map
     pub fn kill(&self, pid: &Pid) {
-        self.map.remove(pid);
+        self.map.remove(pid).map(|entry| {
+            match entry {
+                Entry::Process {id, ..} =>
+                    info!(self.logger, "Kill process"; "id" => id, "pid" => pid.to_string()),
+                Entry::Service {id, ..} =>
+                    info!(self.logger, "Deregister service from processes map (kill)";
+                          "id" => id, "pid" => pid.to_string())
+            }
+        });
     }
 
     /// Register the sender for a service so messages can be sent to it
@@ -154,20 +170,20 @@ impl<T> Processes<T> {
         self.map.upsert(pid.clone(), || Entry::new_service(new_id, tx), |_| {});
         self.map.get(&pid).map_or(Err(()), |entry| {
             match *entry {
-                Entry::Process {..} => Err(()),
+                Entry::Process {id, ..} => {
+                    info!(self.logger, "Register service failed"; "id" => id, "pid" => pid.to_string());
+                    Err(())
+                }
                 Entry::Service { id, ..} => {
                     if id == new_id {
+                        info!(self.logger, "Register service succeded"; "id" => id, "pid" => pid.to_string());
                         return Ok(());
                     }
+                    info!(self.logger, "Register service failed"; "id" => id, "pid" => pid.to_string());
                     Err(())
                 }
             }
         })
-    }
-
-    /// Remove the service's sender from the map
-    pub fn deregister_service(&self, pid: &Pid) {
-        self.map.remove(pid);
     }
 
     /// Send an envelope to a process or service at the given pid
@@ -266,6 +282,9 @@ mod tests {
     use std::collections::VecDeque;
     use std::sync::Arc;
     use parking_lot::Mutex;
+    use slog_term;
+    use slog_async;
+    use slog::{self, Drain};
     use super::*;
     use process::Process;
     use node_id::NodeId;
@@ -303,9 +322,16 @@ mod tests {
         Envelope::new(pid("pid1"), pid("tester"), Msg::User(()), None)
     }
 
+    fn logger() -> Logger {
+        let decorator = slog_term::TermDecorator::new().build();
+        let drain = slog_term::FullFormat::new(decorator).build().fuse();
+        let drain = slog_async::Async::new(drain).build().fuse();
+        Logger::root(drain, o!())
+    }
+
     #[test]
     fn process_lifecycle() {
-        let mut processes = Processes::new();
+        let mut processes = Processes::new(logger());
         let mut deque = processes.clone_deque();
         let pid1 = pid("pid1");
         processes.spawn(pid1.clone(), Box::new(TestProcess) as Box<Process<()>>).unwrap();
