@@ -322,7 +322,10 @@ fn handle_connection_msgs<'de, C, S>(request_timer_wheel: &mut TimerWheel<Correl
                 if envelope.correlation_id.is_some() {
                     request_timer_wheel.insert(envelope.correlation_id.as_ref().unwrap().clone());
                 }
-                node.send(envelope).unwrap();
+                node.send(envelope).map_err(|envelope| {
+                    // TODO: Log this properly
+                    println!("Failed to send envelope {:#?}", envelope);
+                });
             },
             ConnectionMsg::Client(client_msg, _) => {
                 // Respond to the client

@@ -2,6 +2,7 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
 use std::collections::VecDeque;
+use std::time::Duration;
 use parking_lot::{Mutex, Condvar};
 use coco::deque;
 use slog::Logger;
@@ -123,12 +124,21 @@ impl<T> Scheduler<T> {
     ///
     /// This function blocks indefinitely
     pub fn run(mut self) {
+        // TODO: This will no longer be constant when we have a timer wheel
+        let sleep_time = Duration::from_millis(100);
+
         info!(self.logger, "Starting scheduler");
 
         // Output envelopes from calling a process's handle method get placed here temporarily.
         let mut output = Vec::with_capacity(16);
 
         loop {
+
+            // If the system is shutting down, simply exit the loop
+            if self.processes.is_shutdown() {
+                break;
+            }
+
             // 1. Check the global deque for any new Pcbs
             if let Some(pcb) = self.take_unscheduled() {
                 trace!(self.logger, "process scheduled";
@@ -137,14 +147,18 @@ impl<T> Scheduler<T> {
                        "mailbox_len" => pcb.mailbox.len());
                 self.run_queue.push(pcb)
             }
+            trace!(self.logger, "Before run queue steal");
 
             // 2. Attempt to execute a process on the run_queue
             // TODO: We drain all messages in the Pcb mailbox at once, but we may want to limit them
             // instead for fairness. The limit should be added to the scheduler policy.
             match self.run_queue.steal() {
                 Some(mut pcb) => {
+                    trace!(self.logger, "Scheduling a process");
+
                     // Handle all messages in the pcb mailbox
                     for Envelope {from, msg, correlation_id, ..} in pcb.mailbox.drain(..) {
+                        trace!(self.logger, "handling a message");
                         pcb.process.handle(msg, from, correlation_id, &mut output);
 
                         // Send any outgoing messages from the currently executing process
@@ -183,36 +197,36 @@ impl<T> Scheduler<T> {
                     }
                 }
                 None => {
-                    if self.peers.is_empty() {
-                        // There is only a single scheduler in this system
-                        break;
-                    }
-                    // We have no more work to do. Attempt to steal a pcb
-                    let start = self.last_stolen + 1;
-                    let mut current = start;
-                    // TODO: Theoretically we could end up with 2 schedulers continuously stealing the
-                    // same pcb and never acxtually handling messages (livelock). We should check
-                    // that there are at least a few processes on each scheduler before attempting
-                    // to steal from it. We can use atomics for this. These counters will likely
-                    // also be used as part of a migration strategy in the future.
-                    loop {
-                        match self.peers[current].1.steal() {
-                            None => {
-                                current = (current + 1) % self.peers.len();
-                                if current == start {
-                                    trace!(self.logger, "No processes to steal");
+                    trace!(self.logger, "No processes to schedule");
+                    if !self.peers.is_empty() {
+                        // There are other schedulers in this system
+                        // We have no more work to do. Attempt to steal a pcb
+                        let start = self.last_stolen + 1;
+                        let mut current = start;
+                        // TODO: Theoretically we could end up with 2 schedulers continuously stealing the
+                        // same pcb and never acxtually handling messages (livelock). We should check
+                        // that there are at least a few processes on each scheduler before attempting
+                        // to steal from it. We can use atomics for this. These counters will likely
+                        // also be used as part of a migration strategy in the future.
+                        loop {
+                            match self.peers[current].1.steal() {
+                                None => {
+                                    current = (current + 1) % self.peers.len();
+                                    if current == start {
+                                        trace!(self.logger, "No processes to steal");
 
-                                    // We have wrapped around
+                                        // We have wrapped around
+                                        break;
+                                    }
+                                }
+                                Some(pcb) => {
+                                    trace!(self.logger, "process stolen";
+                                           "id" => pcb.id,
+                                           "pid" => pcb.pid.to_string(),
+                                           "mailbox_len" => pcb.mailbox.len());
+                                    self.run_queue.push(pcb);
                                     break;
                                 }
-                            }
-                            Some(pcb) => {
-                                trace!(self.logger, "process stolen";
-                                       "id" => pcb.id,
-                                       "pid" => pcb.pid.to_string(),
-                                       "mailbox_len" => pcb.mailbox.len());
-                                self.run_queue.push(pcb);
-                                break;
                             }
                         }
                     }
@@ -227,12 +241,13 @@ impl<T> Scheduler<T> {
                 // become overloaded.
                 info!(self.logger, "Scheduler sleeping");
                 let mut deque = self.unscheduled.0.lock();
-                self.unscheduled.1.wait(&mut deque);
+                self.unscheduled.1.wait_for(&mut deque, sleep_time);
             }
         }
     }
 
     fn take_unscheduled(&mut self) -> Option<Pcb<T>> {
+        trace!(self.logger, "Take unscheduled");
         let mut unscheduled = self.unscheduled.0.lock();
         (*unscheduled).pop_front()
     }

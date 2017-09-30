@@ -193,7 +193,6 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
     }
 
     fn handle_poll_notifications(&mut self, notifications: Vec<Notification>) -> Result<()> {
-        trace!(self.logger, "handle_poll_notification"; "num_notifications" => notifications.len());
         let mut errors = Vec::new();
         for n in notifications {
             let result = match n.id {
@@ -234,7 +233,6 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
     }
 
     fn read(&mut self, id: usize) -> Result<()> {
-        trace!(self.logger, "read"; "id" => id);
         match self.members_sent(id) {
             Some(false) => try!(self.send_members(id)),
             None => (),
@@ -256,7 +254,6 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
                 self.check_connections();
             },
             ExternalMsg::Ping => {
-                trace!(self.logger, "Got Ping"; "id" => id);
                 self.reset_timer(id);
             }
             ExternalMsg::Envelope(envelope) => {
@@ -281,7 +278,6 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
     }
 
     fn write(&mut self, id: usize, msg: Option<Vec<u8>>) -> Result<()> {
-        trace!(self.logger, "write"; "id" => id);
         let registrar = &self.registrar;
         if let Some(mut conn) = self.connections.get_mut(&id) {
             if msg.is_none() {
@@ -431,7 +427,6 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
     }
 
     fn tick(&mut self) -> Result<()> {
-        trace!(self.logger, "tick");
         let expired = self.timer_wheel.expire();
         self.deregister(expired);
         try!(self.broadcast_pings());
@@ -529,10 +524,6 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
                                        .filter(|&node| *node != self.node).cloned().collect();
 
         let to_disconnect: Vec<NodeId> = known_peer_conns.difference(&all).cloned().collect();
-
-        trace!(self.logger, "check_connections";
-               "to_connect" => format!("{:?}", to_connect),
-               "to_disconnect" => format!("{:?}", to_disconnect));
 
         for node in to_connect {
             self.metrics.connection_attempts += 1;

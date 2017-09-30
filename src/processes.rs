@@ -2,7 +2,7 @@ use std::mem;
 use std::time::Duration;
 use std::collections::VecDeque;
 use std::sync::{mpsc, Arc};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, AtomicBool, Ordering};
 use parking_lot::{Mutex, Condvar};
 use chashmap::CHashMap;
 use amy::{Sender, ChannelError};
@@ -91,7 +91,8 @@ pub struct Processes<T> {
     counter: Arc<AtomicUsize>,
     map: Arc<CHashMap<Pid, Entry<T>>>,
     deque: Option<Arc<(Mutex<VecDeque<Pcb<T>>>, Condvar)>>,
-    logger: Logger
+    logger: Logger,
+    shutdown: Arc<AtomicBool>
 }
 
 impl<T> Processes<T> {
@@ -101,7 +102,8 @@ impl<T> Processes<T> {
             map: Arc::new(CHashMap::with_capacity(1024)),
             deque: Some(Arc::new((Mutex::new(VecDeque::with_capacity(INITIAL_DEQUE_CAPACITY)),
                                   Condvar::new()))),
-            logger: logger.new(o!("component" => "Processes"))
+            logger: logger.new(o!("component" => "Processes")),
+            shutdown: Arc::new(AtomicBool::new(false))
         }
     }
 
@@ -109,6 +111,16 @@ impl<T> Processes<T> {
     /// scheduled.
     pub fn clone_deque(&self) -> Arc<(Mutex<VecDeque<Pcb<T>>>, Condvar)> {
         self.deque.clone().unwrap()
+    }
+
+    /// Let all schedulers know that the system is shutting down
+    pub fn shutdown(&self) {
+        self.shutdown.store(true, Ordering::Relaxed);
+    }
+
+    /// Return true if the system is shutting down
+    pub fn is_shutdown(&self) -> bool {
+        self.shutdown.load(Ordering::Relaxed)
     }
 
     /// Create a process control structure for the process and store it in the processes map
@@ -209,8 +221,12 @@ impl<T> Processes<T> {
         let result = match self.map.get_mut(&envelope.to) {
             Some(mut entry) => {
                 match *entry {
-                    Entry::Process { ref mut pcb, ref mut mailbox, ..} => {
+                    Entry::Process { ref mut pcb, ref mut mailbox, id} => {
                         if let Some(mut pcb) = pcb.take() {
+                            trace!(self.logger, "Send to descheduled process";
+                                   "id" => id,
+                                   "from" => envelope.from.to_string(),
+                                   "to" => envelope.to.to_string());
                             // The process is not scheduled, so push envelope onto the pcb mailbox
                             // and add it to the shared deque so a scheduler can steal it.
                             pcb.mailbox.push(envelope);
@@ -219,12 +235,20 @@ impl<T> Processes<T> {
                             deque.1.notify_one();
                         } else {
                             // The process is already scheduled, push envelope onto the entry mailbox
+                            trace!(self.logger, "Send to already scheduled process";
+                                   "id" => id,
+                                   "from" => envelope.from.to_string(),
+                                   "to" => envelope.to.to_string());
                             mailbox.push(envelope);
                         }
                         Ok(())
                     }
-                    Entry::Service { ref tx, .. } => {
+                    Entry::Service { ref tx, id} => {
                         let tx = tx.lock();
+                        trace!(self.logger, "Send to service";
+                               "id" => id,
+                               "from" => envelope.from.to_string(),
+                               "to" => envelope.to.to_string());
                         tx.send(envelope).map_err(|e| {
                             if let ChannelError::SendError(mpsc::SendError(envelope)) = e {
                                 return envelope;

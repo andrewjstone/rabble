@@ -1,5 +1,5 @@
 use std;
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{Sender, SendError};
 use std::fmt::Debug;
 use serde::{Serialize, Deserialize};
 use amy;
@@ -90,11 +90,24 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> Node<T> {
         self.processes.register_service(pid, tx).map_err(|_| "Failed to register service".into())
     }
 
-    /// Send an envelope to the processes map so it gets routed to the appropriate process or service
+    /// Send an envelope to the proper receiver
+    ///
+    /// Send an envelope to the processes map so it gets routed to the appropriate process or
+    /// service if the envelope is local. Otherwise send it to the cluster_server so it gtets
+    /// forwarded to the correct node.
     ///
     /// Return the envelope if the send fails.
     pub fn send(&mut self, envelope: Envelope<T>) -> std::result::Result<(), Envelope<T>> {
-        self.processes.send(envelope)
+        if envelope.to.node == self.id {
+            self.processes.send(envelope)
+        } else {
+            self.cluster_tx.send(ClusterMsg::Envelope(envelope)).map_err(|SendError(cluster_msg)| {
+                if let ClusterMsg::Envelope(envelope) = cluster_msg {
+                    return envelope;
+                }
+                unreachable!();
+            })
+        }
     }
 
     /// Get the status of the cluster server
@@ -109,5 +122,6 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> Node<T> {
     /// Shutdown the node
     pub fn shutdown(&self) {
         self.cluster_tx.send(ClusterMsg::Shutdown).unwrap();
+        self.processes.shutdown();
     }
 }
