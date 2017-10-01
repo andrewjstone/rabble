@@ -143,11 +143,11 @@ impl<T> Processes<T> {
                         info!(self.logger, "Spawn process succeded"; "id" => id, "pid" => pid.to_string());
                         return Ok(());
                     }
-                    info!(self.logger, "Spawn process failed"; "id" => id, "pid" => pid.to_string());
+                    error!(self.logger, "Spawn process failed"; "id" => id, "pid" => pid.to_string());
                     Err(())
                 }
                 Entry::Service {id, ..} => {
-                    info!(self.logger, "Spawn process failed"; "id" => id, "pid" => pid.to_string());
+                    error!(self.logger, "Spawn process failed"; "id" => id, "pid" => pid.to_string());
                     Err(())
                 }
             }
