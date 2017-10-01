@@ -22,7 +22,6 @@ extern crate parking_lot;
 
 #[macro_use]
 extern crate slog;
-extern crate slog_stdlog;
 extern crate slog_term;
 extern crate slog_async;
 
@@ -78,6 +77,8 @@ pub use service::{
     TcpServerHandler,
 };
 
+pub use scheduler::Scheduler;
+
 use std::thread::{self, JoinHandle};
 use std::sync::mpsc::channel;
 use std::fmt::Debug;
@@ -85,7 +86,6 @@ use serde::{Deserialize, Serialize};
 use amy::Poller;
 use slog::Drain;
 use cluster::ClusterMsg;
-use scheduler::Scheduler;
 
 const TIMEOUT: usize = 5000; // ms
 
