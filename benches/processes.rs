@@ -34,6 +34,40 @@ fn send(b: &mut Bencher) {
     b.iter(|| processes.send(Envelope::new(pid.clone(), pid.clone(), Msg::User(TestMsg::Request), None)))
 }
 
+#[bench]
+fn push_onto_vec(b: &mut Bencher) {
+    let mut v = Vec::with_capacity(16);
+    let pid = pid("counter1");
+    b.iter(|| v.push(Envelope::new(pid.clone(), pid.clone(), Msg::User(TestMsg::Request), None)))
+}
+
+#[bench]
+fn create_envelope(b: &mut Bencher) {
+    let pid = pid("counter1");
+    b.iter(|| Envelope::new(pid.clone(), pid.clone(), Msg::User(TestMsg::Request), None))
+}
+
+#[bench]
+fn register_service(b: &mut Bencher) {
+    let mut processes = processes();
+    let poller = amy::Poller::new().unwrap();
+    let mut registrar = poller.get_registrar().unwrap();
+    let pid = pid("sender1");
+    let (tx, rx) = registrar.channel().unwrap();
+    b.iter(|| processes.register_service(pid.clone(), tx.try_clone().unwrap()))
+}
+
+#[bench]
+fn send_to_service(b: &mut Bencher) {
+    let mut processes = processes();
+    let poller = amy::Poller::new().unwrap();
+    let mut registrar = poller.get_registrar().unwrap();
+    let pid = pid("sender1");
+    let (tx, rx) = registrar.channel().unwrap();
+    processes.register_service(pid.clone(), tx.try_clone().unwrap()).unwrap();
+    b.iter(|| processes.send(Envelope::new(pid.clone(), pid.clone(), Msg::User(TestMsg::Request), None)))
+}
+
 fn pid(name: &str) -> Pid {
     Pid {
         name: name.to_owned(),
