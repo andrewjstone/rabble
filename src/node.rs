@@ -15,7 +15,7 @@ use slog;
 macro_rules! send {
     ($s:ident.$t:ident, $msg:expr, $pid:expr, $errmsg:expr) => {
         if let Err(_) = $s.$t.send($msg) {
-            return Err(ErrorKind::SendError($errmsg, $pid.cloned()).into())
+            return Err(ErrorKind::SendError($errmsg, $pid).into())
         } else {
             return Ok(());
         }
@@ -75,7 +75,7 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> Node<T> {
     pub fn spawn(&self, pid: &Pid, process: Box<Process<T>>) -> Result<()> {
         send!(self.executor_tx,
               ExecutorMsg::Start(pid.clone(), process),
-              Some(pid),
+              Some(pid.clone()),
               format!("ExecutorMsg::Start({}, ..)", pid))
     }
 
@@ -83,7 +83,7 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> Node<T> {
     pub fn stop(&self, pid: &Pid) -> Result<()> {
         send!(self.executor_tx,
               ExecutorMsg::Stop(pid.clone()),
-              Some(pid),
+              Some(pid.clone()),
               format!("ExecutorMsg::Start({}, ..)", pid))
     }
 
@@ -93,7 +93,7 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> Node<T> {
     {
         send!(self.executor_tx,
               ExecutorMsg::RegisterService(pid.clone(), tx.try_clone()?),
-              Some(pid),
+              Some(pid.clone()),
               format!("ExecutorMsg::RegisterService({}, ..)", pid))
     }
 
@@ -102,7 +102,7 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> Node<T> {
         let to = envelope.to.clone();
         send!(self.executor_tx,
               ExecutorMsg::Envelope(envelope),
-              Some(&to),
+              Some(to),
               "ExecutorMsg::Envelope(envelope)".to_string())
     }
 
@@ -111,7 +111,7 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> Node<T> {
         let to = correlation_id.pid.clone();
         send!(self.executor_tx,
               ExecutorMsg::GetStatus(correlation_id),
-              Some(&to),
+              Some(to),
               "ExecutorMsg::GetStatus".to_string())
     }
 
@@ -120,7 +120,7 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> Node<T> {
         let to = correlation_id.pid.clone();
         send!(self.cluster_tx,
               ClusterMsg::GetStatus(correlation_id),
-              Some(&to),
+              Some(to),
               "ClusterMsg::GetStatus".to_string())
     }
 
