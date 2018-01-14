@@ -22,9 +22,6 @@ extern crate serde;
 #[macro_use]
 extern crate serde_derive;
 
-#[macro_use]
-mod metrics;
-
 mod node_id;
 mod node;
 mod members;
@@ -49,7 +46,6 @@ pub use process::Process;
 pub use envelope::Envelope;
 pub use correlation_id::CorrelationId;
 pub use msg::Msg;
-pub use metrics::Metric;
 
 pub use cluster::{
     ClusterServer,

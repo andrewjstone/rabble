@@ -15,7 +15,7 @@ pub trait ServiceHandler<T> {
     }
 
     /// Handle poll notifications.
-
+    ///
     /// Some handler don't register anything that requires notification and only receive
     /// envelopes. Those handlers do not need to implement this function.
     fn handle_notification(&mut self, &Node<T>, Notification, &Registrar) -> Result<()> {

@@ -1,8 +1,9 @@
 use pid::Pid;
+use super::ExecutorMetrics;
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ExecutorStatus {
     pub total_processes: usize,
     pub services: Vec<Pid>,
-    //... Some stats
+    pub metrics: ExecutorMetrics,
 }

@@ -1,9 +1,12 @@
-use metrics::{Metric, Metrics};
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ExecutorMetrics {
+    pub received_envelopes: u64,
+}
 
-metrics!(ExecutorMetrics {
-    processes: i64,
-    services: i64,
-    received_envelopes: u64,
-    timers_started: u64,
-    timers_cancelled: u64
-});
+impl ExecutorMetrics {
+    pub fn new() -> ExecutorMetrics {
+        ExecutorMetrics {
+            received_envelopes: 0
+        }
+    }
+}

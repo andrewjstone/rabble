@@ -11,5 +11,4 @@ pub enum ExecutorMsg<T> {
     RegisterService(Pid, amy::Sender<Envelope<T>>),
     GetStatus(CorrelationId),
     Shutdown,
-    Tick
 }

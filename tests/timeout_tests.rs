@@ -19,7 +19,6 @@ mod utils;
 
 use std::{str};
 use std::net::TcpStream;
-use std::sync::mpsc;
 use amy::Sender;
 use time::Duration;
 
@@ -32,12 +31,10 @@ use utils::{
 
 use rabble::{
     Pid,
-    Process,
     Envelope,
     Msg,
     Node,
-    NodeId,
-    CorrelationId
+    NodeId
 };
 use rabble::serialize::{Serialize, MsgpackSerializer};
 
@@ -56,70 +53,6 @@ fn connection_timeout() {
 
     shutdown(node, service_pid, service_tx);
 
-    for h in handles {
-        h.join().unwrap();
-    }
-}
-
-struct TestProcess {
-    pid: Pid,
-    executor_pid: Option<Pid>,
-
-    /// Don't do this in production!!!
-    /// This is only hear to signal to the test that it has received a message.
-    tx: mpsc::Sender<()>
-}
-
-impl Process<()> for TestProcess {
-
-    fn init(&mut self, executor_pid: Pid) -> Vec<Envelope<()>> {
-        self.executor_pid = Some(executor_pid);
-        // Start a timer with a 100ms timeout and no correlation id. We don't need one
-        // since there is only one timer in this example
-        vec![Envelope::new(self.executor_pid.as_ref().unwrap().clone(),
-                           self.pid.clone(),
-                           Msg::StartTimer(100),
-                           None)]
-    }
-
-    fn handle(&mut self,
-              msg: Msg<()>,
-              from: Pid,
-              correlation_id: Option<CorrelationId>,
-              _: &mut Vec<Envelope<()>>)
-    {
-        assert_eq!(from, *self.executor_pid.as_ref().unwrap());
-        assert_eq!(msg, Msg::Timeout);
-        assert_eq!(correlation_id, None);
-        self.tx.send(()).unwrap();
-    }
-}
-
-#[test]
-fn process_timeout() {
-    let node_id = NodeId {name: "node1".to_string(), addr: "127.0.0.1:11002".to_string()};
-    let (node, handles) = rabble::rouse::<()>(node_id.clone(), None);
-
-    let pid = Pid {
-        name: "some-process".to_string(),
-        group: None,
-        node: node_id
-    };
-
-    let (tx, rx) = mpsc::channel();
-
-    let process = TestProcess {
-        pid: pid.clone(),
-        executor_pid: None,
-        tx: tx
-    };
-
-    node.spawn(&pid, Box::new(process)).unwrap();
-
-    // Wait for the process to get the timeout
-    rx.recv().unwrap();
-
-    node.shutdown();
     for h in handles {
         h.join().unwrap();
     }

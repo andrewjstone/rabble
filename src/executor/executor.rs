@@ -5,8 +5,6 @@ use std::sync::mpsc::{Sender, Receiver};
 use std::collections::HashMap;
 use amy;
 use slog;
-use time::Duration;
-use ferris::{Wheel, CopyWheel, Resolution};
 use envelope::Envelope;
 use pid::Pid;
 use process::Process;
@@ -14,8 +12,7 @@ use node_id::NodeId;
 use msg::Msg;
 use cluster::ClusterMsg;
 use correlation_id::CorrelationId;
-use metrics::Metrics;
-use super::{ExecutorStatus, ExecutorMetrics, ExecutorMsg};
+use super::{ExecutorStatus, ExecutorMsg, ExecutorMetrics};
 
 pub struct Executor<T> {
     pid: Pid,
@@ -26,7 +23,6 @@ pub struct Executor<T> {
     tx: Sender<ExecutorMsg<T>>,
     rx: Receiver<ExecutorMsg<T>>,
     cluster_tx: Sender<ClusterMsg<T>>,
-    timer_wheel: CopyWheel<(Pid, Option<CorrelationId>)>,
     logger: slog::Logger,
     metrics: ExecutorMetrics
 }
@@ -51,7 +47,6 @@ impl<'de, T: Serialize + Deserialize<'de> + Send + Debug + Clone> Executor<T> {
             tx: tx,
             rx: rx,
             cluster_tx: cluster_tx,
-            timer_wheel: CopyWheel::new(vec![Resolution::TenMs, Resolution::Sec, Resolution::Min]),
             logger: logger.new(o!("component" => "executor")),
             metrics: ExecutorMetrics::new()
         }
@@ -73,8 +68,6 @@ impl<'de, T: Serialize + Deserialize<'de> + Send + Debug + Clone> Executor<T> {
                     self.service_senders.insert(pid, tx);
                 },
                 ExecutorMsg::GetStatus(correlation_id) => self.get_status(correlation_id),
-                ExecutorMsg::Tick => self.tick(),
-
                 // Just return so the thread exits
                 ExecutorMsg::Shutdown => return
             }
@@ -84,7 +77,8 @@ impl<'de, T: Serialize + Deserialize<'de> + Send + Debug + Clone> Executor<T> {
     fn get_status(&self, correlation_id: CorrelationId) {
         let status = ExecutorStatus {
             total_processes: self.processes.len(),
-            services: self.service_senders.keys().cloned().collect()
+            services: self.service_senders.keys().cloned().collect(),
+            metrics: self.metrics.clone()
         };
         let envelope = Envelope {
             to: correlation_id.pid.clone(),
@@ -99,23 +93,12 @@ impl<'de, T: Serialize + Deserialize<'de> + Send + Debug + Clone> Executor<T> {
         let envelopes = process.init(self.pid.clone());
         self.processes.insert(pid, process);
         for envelope in envelopes {
-            if envelope.to == self.pid {
-                self.handle_executor_envelope(envelope);
-            } else {
                 self.route(envelope);
-            }
         }
     }
 
     fn stop(&mut self, pid: Pid) {
         self.processes.remove(&pid);
-    }
-
-    fn tick(&mut self) {
-        for (pid, c_id) in self.timer_wheel.expire() {
-            let envelope = Envelope::new(pid, self.pid.clone(), Msg::Timeout, c_id);
-            let _ = self.route_to_process(envelope);
-        }
     }
 
     /// Route envelopes to local or remote processes
@@ -139,11 +122,6 @@ impl<'de, T: Serialize + Deserialize<'de> + Send + Debug + Clone> Executor<T> {
     ///
     /// Return Ok(()) if the process exists, Err(envelope) otherwise.
     fn route_to_process(&mut self, envelope: Envelope<T>) -> Result<(), Envelope<T>> {
-        if envelope.to == self.pid {
-            self.handle_executor_envelope(envelope);
-            return Ok(());
-        }
-
         if &envelope.to.name == "cluster_server" &&
             envelope.to.group.as_ref().unwrap() == "rabble"
         {
@@ -161,10 +139,6 @@ impl<'de, T: Serialize + Deserialize<'de> + Send + Debug + Clone> Executor<T> {
         // Take envelopes out of self temporarily so we don't get a borrowck error
         let mut envelopes = mem::replace(&mut self.envelopes, Vec::new());
         for envelope in envelopes.drain(..) {
-            if envelope.to == self.pid {
-                self.handle_executor_envelope(envelope);
-                continue;
-            }
             if envelope.to.node == self.node {
                 // This won't ever fail because we hold a ref to both ends of the channel
                 self.tx.send(ExecutorMsg::Envelope(envelope)).unwrap();
@@ -185,35 +159,4 @@ impl<'de, T: Serialize + Deserialize<'de> + Send + Debug + Clone> Executor<T> {
             warn!(self.logger, "Failed to find service"; "pid" => envelope.to.to_string());
         }
     }
-
-    fn handle_executor_envelope(&mut self, envelope: Envelope<T>) {
-        let Envelope {from, msg, correlation_id, ..} = envelope;
-        match msg {
-            Msg::StartTimer(time_in_ms) => {
-                self.timer_wheel.start((from, correlation_id),
-                                       Duration::milliseconds(time_in_ms as i64));
-                self.metrics.timers_started += 1;
-            },
-            Msg::CancelTimer(correlation_id) => {
-                self.timer_wheel.stop((from, correlation_id));
-                self.metrics.timers_cancelled += 1;
-            }
-            Msg::GetMetrics => self.send_metrics(from, correlation_id),
-            _ => error!(self.logger, "Invalid message sent to executor";
-                        "from" => from.to_string(), "msg" => format!("{:?}", msg))
-        }
-    }
-
-    fn send_metrics(&mut self, from: Pid, correlation_id: Option<CorrelationId>) {
-        self.metrics.processes = self.processes.len() as i64;
-        self.metrics.services = self.service_senders.len() as i64;
-        let envelope = Envelope {
-            to: from,
-            from: self.pid.clone(),
-            msg: Msg::Metrics(self.metrics.data()),
-            correlation_id: correlation_id
-        };
-        self.route(envelope);
-    }
 }
-

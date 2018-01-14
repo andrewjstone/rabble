@@ -18,16 +18,12 @@ use orset::{ORSet, Delta};
 use pid::Pid;
 use correlation_id::CorrelationId;
 use errors::*;
-use metrics::Metrics;
 use super::{ClusterStatus, ClusterMsg, ExternalMsg, ClusterMetrics};
 
 // TODO: This is totally arbitrary right now and should probably be user configurable
 const MAX_FRAME_SIZE: u32 = 100*1024*1024; // 100 MB
 const TICK_TIME: usize = 1000; // milliseconds
 const REQUEST_TIMEOUT: usize = 5000; // milliseconds
-
-// This tick allows process specific timers to fire
-const EXECUTOR_TICK_TIME: usize = 100; // milliseconds
 
 struct Conn {
     sock: TcpStream,
@@ -60,7 +56,6 @@ pub struct ClusterServer<T> {
     node: NodeId,
     rx: Receiver<ClusterMsg<T>>,
     executor_tx: Sender<ExecutorMsg<T>>,
-    executor_timer_id: usize,
     timer_id: usize,
     timer_wheel: TimerWheel<usize>,
     listener: TcpListener,
@@ -91,7 +86,6 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
             node: node.clone(),
             rx: rx,
             executor_tx: executor_tx,
-            executor_timer_id: 0,
             timer_id: 0,
             timer_wheel: TimerWheel::new(REQUEST_TIMEOUT / TICK_TIME),
             listener: listener,
@@ -108,7 +102,6 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
     pub fn run(mut self) {
         info!(self.logger, "Starting");
         self.timer_id = self.registrar.set_interval(TICK_TIME).unwrap();
-        self.executor_timer_id = self.registrar.set_interval(EXECUTOR_TICK_TIME).unwrap();
         self.listener_id = self.registrar.register(&self.listener, Event::Read).unwrap();
         while let Ok(msg) = self.rx.recv() {
             if let Err(e) = self.handle_cluster_msg(msg) {
@@ -150,11 +143,6 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
             },
             ClusterMsg::Envelope(envelope) => {
                 self.metrics.received_local_envelopes += 1;
-                // Only metric requests are directly sent to the cluster server
-                if envelope.to == self.pid {
-                    self.send_metrics(envelope);
-                    return Ok(());
-                }
                 self.send_remote(envelope)
             },
             ClusterMsg::GetStatus(correlation_id) => {
@@ -169,7 +157,8 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
         let status = ClusterStatus {
             members: self.members.all(),
             established: self.established.keys().cloned().collect(),
-            num_connections: self.connections.len()
+            num_connections: self.connections.len(),
+            metrics: self.metrics.clone()
         };
         let envelope = Envelope {
             to: correlation_id.pid.clone(),
@@ -206,7 +195,6 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
             let result = match n.id {
                 id if id == self.listener_id => self.accept_connection(),
                 id if id == self.timer_id => self.tick(),
-                id if id == self.executor_timer_id => self.tick_executor(),
                 _ => self.do_socket_io(n)
             };
 
@@ -449,13 +437,6 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
         Ok(())
     }
 
-    fn tick_executor(&mut self) -> Result<()> {
-        trace!(self.logger, "tick_executor");
-        // Panic if the executor is down.
-        self.executor_tx.send(ExecutorMsg::Tick).unwrap() ;
-        Ok(())
-    }
-
     fn encode_members(&self, id: usize) -> Result<Vec<u8>> {
         let orset = self.members.get_orset();
         let mut encoded = Vec::new();
@@ -584,27 +565,6 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
                            "error" => e.to_string());
                 }
             }
-        }
-    }
-
-    fn send_metrics(&mut self, envelope: Envelope<T>) {
-        if let Msg::GetMetrics = envelope.msg {
-            let new_envelope = Envelope {
-                to: envelope.from,
-                from: self.pid.clone(),
-                msg: Msg::Metrics(self.metrics.data()),
-                correlation_id: envelope.correlation_id
-            };
-            // Route the response through the executor since it knows how to contact all Pids
-            if let Err(mpsc::SendError(ExecutorMsg::Envelope(new_envelope))) =
-                self.executor_tx.send(ExecutorMsg::Envelope(new_envelope))
-            {
-                error!(self.logger, "Failed to send to executor";
-                    "envelope" => format!("{:?}", new_envelope));
-            }
-        } else {
-            error!(self.logger, "Received Unknown Msg";
-                   "envelope" => format!("{:?}", envelope));
         }
     }
 }
