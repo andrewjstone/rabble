@@ -2,15 +2,14 @@ use std::sync::mpsc::Sender;
 use std::fmt::Debug;
 use serde::{Serialize, Deserialize};
 use node_id::NodeId;
-use executor::ExecutorMsg;
-use cluster::ClusterMsg;
+use executor::{ExecutorMsg, ExecutorStatus};
+use cluster::{ClusterMsg, ClusterStatus};
 use pid::Pid;
-use correlation_id::CorrelationId;
 use process::Process;
 use envelope::Envelope;
-use amy;
 use errors::*;
 use slog;
+use futures::sync::oneshot;
 
 macro_rules! send {
     ($s:ident.$t:ident, $msg:expr, $pid:expr, $errmsg:expr) => {
@@ -89,10 +88,10 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> Node<T> {
 
     /// Register a Service's sender with the executor so that it can be sent messages addressed to
     /// its pid
-    pub fn register_service(&self, pid: &Pid, tx: &amy::Sender<Envelope<T>>) -> Result<()>
+    pub fn register_service(&self, pid: &Pid, tx: &Sender<Envelope<T>>) -> Result<()>
     {
         send!(self.executor_tx,
-              ExecutorMsg::RegisterService(pid.clone(), tx.try_clone()?),
+              ExecutorMsg::RegisterService(pid.clone(), tx.clone()),
               Some(pid.clone()),
               format!("ExecutorMsg::RegisterService({}, ..)", pid))
     }
@@ -107,21 +106,19 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> Node<T> {
     }
 
     /// Get the status of the executor
-    pub fn executor_status(&self, correlation_id: CorrelationId) -> Result<()> {
-        let to = correlation_id.pid.clone();
-        send!(self.executor_tx,
-              ExecutorMsg::GetStatus(correlation_id),
-              Some(to),
-              "ExecutorMsg::GetStatus".to_string())
+    pub fn executor_status(&self, reply_tx: oneshot::Sender<ExecutorStatus>) -> Result<()> {
+        self.executor_tx.send(ExecutorMsg::GetStatus(reply_tx)).map_err(|_| {
+            let errmsg = "ExecutorMsg::GetStatus".to_owned();
+            ErrorKind::SendError(errmsg, None).into()
+        })
     }
 
     /// Get the status of the cluster server
-    pub fn cluster_status(&self, correlation_id: CorrelationId) -> Result<()> {
-        let to = correlation_id.pid.clone();
-        send!(self.cluster_tx,
-              ClusterMsg::GetStatus(correlation_id),
-              Some(to),
-              "ClusterMsg::GetStatus".to_string())
+    pub fn cluster_status(&self, reply_tx: oneshot::Sender<ClusterStatus>) -> Result<()> {
+        self.cluster_tx.send(ClusterMsg::GetStatus(reply_tx)).map_err(|_| {
+            let errmsg = "ClusterMsg::GetStatus".to_owned();
+            ErrorKind::SendError(errmsg, None).into()
+        })
     }
 
     /// Shutdown the node

@@ -1,4 +1,4 @@
-use std::io;
+use std::{self, io};
 use msgpack;
 use protobuf;
 use pid::Pid;
@@ -8,6 +8,7 @@ use node_id::NodeId;
 error_chain! {
     foreign_links {
         io::Error, Io;
+        std::sync::mpsc::RecvError, RecvError;
         msgpack::encode::Error, MsgpackEncode;
         msgpack::decode::Error, MsgpackDecode;
         protobuf::error::ProtobufError, Protobuf;

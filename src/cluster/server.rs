@@ -10,14 +10,13 @@ use slog;
 use amy::{Registrar, Notification, Event, FrameReader, FrameWriter};
 use members::Members;
 use node_id::NodeId;
-use msg::Msg;
 use executor::ExecutorMsg;
 use timer_wheel::TimerWheel;
 use envelope::Envelope;
 use orset::{ORSet, Delta};
 use pid::Pid;
-use correlation_id::CorrelationId;
 use errors::*;
+use futures::sync::oneshot;
 use super::{ClusterStatus, ClusterMsg, ExternalMsg, ClusterMetrics};
 
 // TODO: This is totally arbitrary right now and should probably be user configurable
@@ -145,35 +144,22 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
                 self.metrics.received_local_envelopes += 1;
                 self.send_remote(envelope)
             },
-            ClusterMsg::GetStatus(correlation_id) => {
+            ClusterMsg::GetStatus(tx) => {
                 self.metrics.status_requests += 1;
-                self.get_status(correlation_id)
+                self.get_status(tx)
             },
             ClusterMsg::Shutdown => Err(ErrorKind::Shutdown(self.pid.clone()).into())
         }
     }
 
-    fn get_status(&self, correlation_id: CorrelationId) -> Result<()> {
+    fn get_status(&self, tx: oneshot::Sender<ClusterStatus>) -> Result<()> {
         let status = ClusterStatus {
             members: self.members.all(),
             established: self.established.keys().cloned().collect(),
             num_connections: self.connections.len(),
             metrics: self.metrics.clone()
         };
-        let envelope = Envelope {
-            to: correlation_id.pid.clone(),
-            from: self.pid.clone(),
-            msg: Msg::ClusterStatus(status),
-            correlation_id: Some(correlation_id)
-        };
-        // Route the response through the executor since it knows how to contact all Pids
-        if let Err(mpsc::SendError(ExecutorMsg::Envelope(envelope))) =
-            self.executor_tx.send(ExecutorMsg::Envelope(envelope))
-        {
-            return Err(ErrorKind::SendError("ExecutorMsg::Envelope".to_string(),
-                                            Some(envelope.to)).into());
-        }
-        Ok(())
+        tx.send(status).map_err(|_| "Failed to send cluster status over oneshot".into())
     }
 
     fn send_remote(&mut self, envelope: Envelope<T>) -> Result<()> {

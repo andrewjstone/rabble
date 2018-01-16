@@ -1,7 +1,6 @@
 use pid::Pid;
 use msg::Msg;
 use envelope::Envelope;
-use correlation_id::CorrelationId;
 
 pub trait Process<T> : Send {
     /// Initialize process state if necessary
@@ -13,6 +12,5 @@ pub trait Process<T> : Send {
     fn handle(&mut self,
               msg: Msg<T>,
               from: Pid,
-              correlation_id: Option<CorrelationId>,
               output: &mut Vec<Envelope<T>>);
 }

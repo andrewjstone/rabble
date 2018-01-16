@@ -3,23 +3,21 @@ use std::mem;
 use std::fmt::Debug;
 use std::sync::mpsc::{Sender, Receiver};
 use std::collections::HashMap;
-use amy;
 use slog;
 use envelope::Envelope;
 use pid::Pid;
 use process::Process;
 use node_id::NodeId;
-use msg::Msg;
 use cluster::ClusterMsg;
-use correlation_id::CorrelationId;
 use super::{ExecutorStatus, ExecutorMsg, ExecutorMetrics};
+use futures::sync::oneshot;
 
 pub struct Executor<T> {
     pid: Pid,
     node: NodeId,
     envelopes: Vec<Envelope<T>>,
     processes: HashMap<Pid, Box<Process<T>>>,
-    service_senders: HashMap<Pid, amy::Sender<Envelope<T>>>,
+    service_senders: HashMap<Pid, Sender<Envelope<T>>>,
     tx: Sender<ExecutorMsg<T>>,
     rx: Receiver<ExecutorMsg<T>>,
     cluster_tx: Sender<ClusterMsg<T>>,
@@ -67,26 +65,20 @@ impl<'de, T: Serialize + Deserialize<'de> + Send + Debug + Clone> Executor<T> {
                 ExecutorMsg::RegisterService(pid, tx) => {
                     self.service_senders.insert(pid, tx);
                 },
-                ExecutorMsg::GetStatus(correlation_id) => self.get_status(correlation_id),
+                ExecutorMsg::GetStatus(tx) => self.get_status(tx),
                 // Just return so the thread exits
                 ExecutorMsg::Shutdown => return
             }
         }
     }
 
-    fn get_status(&self, correlation_id: CorrelationId) {
+    fn get_status(&self, tx: oneshot::Sender<ExecutorStatus>) {
         let status = ExecutorStatus {
             total_processes: self.processes.len(),
             services: self.service_senders.keys().cloned().collect(),
             metrics: self.metrics.clone()
         };
-        let envelope = Envelope {
-            to: correlation_id.pid.clone(),
-            from: self.pid.clone(),
-            msg: Msg::ExecutorStatus(status),
-            correlation_id: Some(correlation_id)
-        };
-        self.route_to_service(envelope);
+        let _ = tx.send(status);
     }
 
     fn start(&mut self, pid: Pid, mut process: Box<Process<T>>) {
@@ -130,8 +122,8 @@ impl<'de, T: Serialize + Deserialize<'de> + Send + Debug + Clone> Executor<T> {
         }
 
         if let Some(process) = self.processes.get_mut(&envelope.to) {
-            let Envelope {from, msg, correlation_id, ..} = envelope;
-            process.handle(msg, from, correlation_id, &mut self.envelopes);
+            let Envelope {from, msg, ..} = envelope;
+            process.handle(msg, from, &mut self.envelopes);
         } else {
             return Err(envelope);
         };

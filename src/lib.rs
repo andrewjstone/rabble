@@ -12,6 +12,7 @@ extern crate net2;
 extern crate libc;
 extern crate ferris;
 //extern crate hdrsample;
+extern crate futures;
 
 #[macro_use]
 extern crate slog;
@@ -33,7 +34,6 @@ mod cluster;
 mod msg;
 mod timer_wheel;
 mod service;
-mod correlation_id;
 pub mod serialize;
 
 pub mod errors;
@@ -44,7 +44,6 @@ pub use node::Node;
 pub use pid::Pid;
 pub use process::Process;
 pub use envelope::Envelope;
-pub use correlation_id::CorrelationId;
 pub use msg::Msg;
 
 pub use cluster::{
@@ -60,10 +59,7 @@ pub use executor::{
 
 pub use service::{
     Service,
-    ConnectionHandler,
-    ConnectionMsg,
-    ServiceHandler,
-    TcpServerHandler,
+    ServiceHandler
 };
 
 use std::thread::{self, JoinHandle};

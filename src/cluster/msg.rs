@@ -2,7 +2,8 @@ use amy::Notification;
 use orset::{ORSet, Delta};
 use node_id::NodeId;
 use envelope::Envelope;
-use correlation_id::CorrelationId;
+use super::ClusterStatus;
+use futures::sync::oneshot::Sender;
 
 /// Messages sent to the Cluster Server
 pub enum ClusterMsg<T> {
@@ -10,7 +11,7 @@ pub enum ClusterMsg<T> {
     Join(NodeId),
     Leave(NodeId),
     Envelope(Envelope<T>),
-    GetStatus(CorrelationId),
+    GetStatus(Sender<ClusterStatus>),
     Shutdown
 }
 
