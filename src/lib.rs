@@ -33,7 +33,8 @@ mod executor;
 mod cluster;
 mod msg;
 mod timer_wheel;
-mod service;
+
+pub mod channel;
 pub mod serialize;
 
 pub mod errors;
@@ -55,11 +56,6 @@ pub use executor::{
     Executor,
     ExecutorStatus,
     ExecutorMetrics
-};
-
-pub use service::{
-    Service,
-    ServiceHandler
 };
 
 use std::thread::{self, JoinHandle};
@@ -92,6 +88,7 @@ pub fn rouse<'de, T>(node_id: NodeId, logger: Option<slog::Logger>) -> (Node<T>,
                                             exec_tx.clone(),
                                             poller.get_registrar().unwrap(),
                                             logger.clone());
+
     let executor = Executor::new(node_id.clone(),
                                  exec_tx.clone(),
                                  exec_rx,

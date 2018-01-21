@@ -1,5 +1,7 @@
 use std::sync::mpsc::Sender;
 use std::fmt::Debug;
+use futures::sync::oneshot;
+use slog;
 use serde::{Serialize, Deserialize};
 use node_id::NodeId;
 use executor::{ExecutorMsg, ExecutorStatus};
@@ -8,8 +10,7 @@ use pid::Pid;
 use process::Process;
 use envelope::Envelope;
 use errors::*;
-use slog;
-use futures::sync::oneshot;
+use channel;
 
 macro_rules! send {
     ($s:ident.$t:ident, $msg:expr, $pid:expr, $errmsg:expr) => {
@@ -88,10 +89,10 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> Node<T> {
 
     /// Register a Service's sender with the executor so that it can be sent messages addressed to
     /// its pid
-    pub fn register_service(&self, pid: &Pid, tx: &Sender<Envelope<T>>) -> Result<()>
+    pub fn register_service(&self, pid: &Pid, tx: Box<channel::Sender<Envelope<T>>>) -> Result<()>
     {
         send!(self.executor_tx,
-              ExecutorMsg::RegisterService(pid.clone(), tx.clone()),
+              ExecutorMsg::RegisterService(pid.clone(), tx),
               Some(pid.clone()),
               format!("ExecutorMsg::RegisterService({}, ..)", pid))
     }

@@ -3,6 +3,7 @@ use std::mem;
 use std::fmt::Debug;
 use std::sync::mpsc::{Sender, Receiver};
 use std::collections::HashMap;
+use futures::sync::oneshot;
 use slog;
 use envelope::Envelope;
 use pid::Pid;
@@ -10,14 +11,14 @@ use process::Process;
 use node_id::NodeId;
 use cluster::ClusterMsg;
 use super::{ExecutorStatus, ExecutorMsg, ExecutorMetrics};
-use futures::sync::oneshot;
+use channel;
 
 pub struct Executor<T> {
     pid: Pid,
     node: NodeId,
     envelopes: Vec<Envelope<T>>,
     processes: HashMap<Pid, Box<Process<T>>>,
-    service_senders: HashMap<Pid, Sender<Envelope<T>>>,
+    service_senders: HashMap<Pid, Box<channel::Sender<Envelope<T>>>>,
     tx: Sender<ExecutorMsg<T>>,
     rx: Receiver<ExecutorMsg<T>>,
     cluster_tx: Sender<ClusterMsg<T>>,
