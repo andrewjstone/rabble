@@ -2,7 +2,6 @@ use rabble::{
     Pid,
     Process,
     Envelope,
-    CorrelationId,
     Msg
 };
 
@@ -30,23 +29,19 @@ impl Replica {
 impl Process<RabbleUserMsg> for Replica {
     fn handle(&mut self,
               msg: Msg<RabbleUserMsg>,
-              _from: Pid,
-              correlation_id: Option<CorrelationId>,
+              from: Pid,
               output: &mut Vec<Envelope<RabbleUserMsg>>)
     {
-        let to = correlation_id.as_ref().unwrap().pid.clone();
-        let from = self.pid.clone();
         match msg {
             Msg::User(RabbleUserMsg::Op(val)) => {
                 let msg = Msg::User(RabbleUserMsg::OpComplete);
-                let reply = Envelope::new(to, from, msg, correlation_id.clone());
+                let reply = Envelope::new(from.clone(), self.pid.clone(), msg);
 
-                // If there is no next pid send the reply to the original caller in the correlation
-                // id. Otherwise forward to the next process in the chain.
+                // If there is no next pid send the reply to the original sender in the `from'
+                // field. Otherwise forward to the next process in the chain.
                 let envelope = self.next.as_ref().map_or(reply, |to| {
-                    let from = self.pid.clone();
                     let msg = Msg::User(RabbleUserMsg::Op(val));
-                    Envelope::new(to.clone(), from, msg, correlation_id)
+                    Envelope::new(to.clone(), from, msg)
                 });
 
                 self.history.push(val);
@@ -54,7 +49,7 @@ impl Process<RabbleUserMsg> for Replica {
             },
             Msg::User(RabbleUserMsg::GetHistory) => {
                 let msg = Msg::User(RabbleUserMsg::History(self.history.clone()));
-                let envelope = Envelope::new(to, from, msg, correlation_id);
+                let envelope = Envelope::new(from, self.pid.clone(), msg);
                 output.push(envelope);
             },
             _ => ()

@@ -1,4 +1,3 @@
-use rabble::Pid;
 
 // Msg type parameter for messages sent to processes and services
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -9,14 +8,3 @@ pub enum RabbleUserMsg {
     GetHistory, // Request
     History(Vec<usize>) // Reply
 }
-
-// Messages sent over the API server TCP connections
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
-pub enum ApiClientMsg {
-    Op(Pid, usize),
-    OpComplete,
-    GetHistory(Pid),
-    History(Vec<usize>),
-    Timeout
-}
-
