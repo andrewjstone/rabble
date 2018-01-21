@@ -35,7 +35,6 @@ mod msg;
 mod timer_wheel;
 
 pub mod channel;
-pub mod serialize;
 
 pub mod errors;
 
