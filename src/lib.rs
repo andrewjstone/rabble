@@ -5,13 +5,12 @@ extern crate error_chain;
 
 extern crate orset;
 extern crate rmp_serde as msgpack;
-extern crate protobuf;
 extern crate amy;
 extern crate time;
 extern crate net2;
 extern crate libc;
 extern crate ferris;
-//extern crate hdrsample;
+extern crate hdrsample;
 extern crate futures;
 
 #[macro_use]
@@ -19,6 +18,7 @@ extern crate slog;
 extern crate slog_stdlog;
 
 extern crate serde;
+extern crate serde_bytes;
 
 #[macro_use]
 extern crate serde_derive;
@@ -34,8 +34,8 @@ mod cluster;
 mod msg;
 mod timer_wheel;
 
+pub mod histogram;
 pub mod channel;
-
 pub mod errors;
 
 pub use errors::Result;

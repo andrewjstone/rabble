@@ -3,6 +3,7 @@ use std::mem;
 use std::fmt::Debug;
 use std::sync::mpsc::{Sender, Receiver};
 use std::collections::HashMap;
+use std::time::Instant;
 use futures::sync::oneshot;
 use slog;
 use envelope::Envelope;
@@ -59,7 +60,10 @@ impl<'de, T: Serialize + Deserialize<'de> + Send + Debug + Clone> Executor<T> {
             match msg {
                 ExecutorMsg::Envelope(envelope) => {
                     self.metrics.received_envelopes += 1;
+                    let start = Instant::now();
                     self.route(envelope);
+                    self.metrics.route_envelope_ns.0 += duration(start);
+
                 },
                 ExecutorMsg::Start(pid, process) => self.start(pid, process),
                 ExecutorMsg::Stop(pid) => self.stop(pid),
@@ -82,7 +86,9 @@ impl<'de, T: Serialize + Deserialize<'de> + Send + Debug + Clone> Executor<T> {
         let _ = tx.send(status);
     }
 
-    fn start(&mut self, pid: Pid, mut process: Box<Process<T>>) {
+    // Public only for benchmarking
+    #[doc(hidden)]
+    pub fn start(&mut self, pid: Pid, mut process: Box<Process<T>>) {
         let envelopes = process.init(self.pid.clone());
         self.processes.insert(pid, process);
         for envelope in envelopes {
@@ -101,7 +107,10 @@ impl<'de, T: Serialize + Deserialize<'de> + Send + Debug + Clone> Executor<T> {
     ///
     /// Note that all envelopes sent to an executor are sent from the local cluster server and must
     /// be addressed to local processes.
-    fn route(&mut self, envelope: Envelope<T>) {
+    ///
+    /// Public only for benchmarking
+    #[doc(hidden)]
+    pub fn route(&mut self, envelope: Envelope<T>) {
         if self.node != envelope.to.node {
             self.cluster_tx.send(ClusterMsg::Envelope(envelope)).unwrap();
             return;
@@ -152,4 +161,13 @@ impl<'de, T: Serialize + Deserialize<'de> + Send + Debug + Clone> Executor<T> {
             warn!(self.logger, "Failed to find service"; "pid" => envelope.to.to_string());
         }
     }
+}
+
+/// Return the number of nanoseconds since start
+///
+/// Ignore any possible overflow as the number of seconds is guaranteed to be small (likely 0)
+#[inline]
+fn duration(start: Instant) -> u64 {
+    let elapsed = start.elapsed();
+    elapsed.as_secs()*1000000000 + elapsed.subsec_nanos() as u64
 }
