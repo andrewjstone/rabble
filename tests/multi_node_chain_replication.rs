@@ -35,7 +35,7 @@ use rabble::{
     channel
 };
 
-type CrNode = Node<RabbleUserMsg>;
+type CrNode = Node<TestMsg>;
 
 
 #[test]
@@ -44,7 +44,7 @@ fn chain_replication() {
 
     let test_pid = test_pid(nodes[0].id.clone());
     let (test_tx, test_rx) = mpsc::channel();
-    let test_tx = Box::new(test_tx) as Box<channel::Sender<Envelope<RabbleUserMsg>>>;
+    let test_tx = Box::new(test_tx) as Box<channel::Sender<Envelope<TestMsg>>>;
     // Send all requests from node 1
     nodes[0].register_service(&test_pid, test_tx).unwrap();
 

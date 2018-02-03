@@ -31,7 +31,7 @@ fn chain_replication() {
     let test_pid = test_pid(node.id.clone());
 
     let (test_tx, test_rx) = mpsc::channel();
-    let test_tx = Box::new(test_tx) as Box<channel::Sender<Envelope<RabbleUserMsg>>>;
+    let test_tx = Box::new(test_tx) as Box<channel::Sender<Envelope<TestMsg>>>;
     node.register_service(&test_pid, test_tx).unwrap();
 
     let pids = create_replica_pids(&node.id);
@@ -57,7 +57,7 @@ fn create_replica_pids(node_id: &NodeId) -> Vec<Pid> {
     }).collect()
 }
 
-fn spawn_replicas(node: &Node<RabbleUserMsg>, pids: &Vec<Pid>) {
+fn spawn_replicas(node: &Node<TestMsg>, pids: &Vec<Pid>) {
     // Launch the three replicas participating in chain replication
     for i in 0..pids.len() {
         let next = if i == pids.len() - 1 {

@@ -45,6 +45,7 @@ pub use pid::Pid;
 pub use process::Process;
 pub use envelope::Envelope;
 pub use msg::Msg;
+pub use terminal::{Terminal, TimerId};
 
 pub use cluster::{
     ClusterServer,

@@ -77,7 +77,7 @@ fn join_leave() {
     }
 }
 
-fn wait_for_cluster_status(node: &Node<RabbleUserMsg>,
+fn wait_for_cluster_status(node: &Node<TestMsg>,
                            num_connected: usize) -> bool
 {
     let timeout = Duration::seconds(5);

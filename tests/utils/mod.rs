@@ -50,7 +50,7 @@ pub fn create_node_ids(n: usize) -> Vec<NodeId> {
 }
 
 #[allow(dead_code)] // Not used in all tests
-pub fn start_nodes(n: usize) -> (Vec<Node<RabbleUserMsg>>, Vec<JoinHandle<()>>) {
+pub fn start_nodes(n: usize) -> (Vec<Node<TestMsg>>, Vec<JoinHandle<()>>) {
     let term = slog_term::streamer().build();
     let drain = slog_envlogger::LogBuilder::new(term)
         .filter(None, slog::FilterLevel::Debug).build();
