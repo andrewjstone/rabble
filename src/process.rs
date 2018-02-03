@@ -1,16 +1,15 @@
 use pid::Pid;
 use msg::Msg;
-use envelope::Envelope;
+use terminal::Terminal;
+use executor::ExecutorTerminal;
 
-pub trait Process<T> : Send {
+pub trait Process<M, T=ExecutorTerminal<M>> : Send where T: Terminal<M> {
     /// Initialize process state if necessary
-    fn init(&mut self, _executor_pid: Pid) -> Vec<Envelope<T>> {
-        Vec::new()
-    }
+    fn init(&mut self, _terminal: &mut T) {}
 
     /// Handle messages from other actors
     fn handle(&mut self,
-              msg: Msg<T>,
+              msg: Msg<M>,
               from: Pid,
-              output: &mut Vec<Envelope<T>>);
+              terminal: &mut T);
 }

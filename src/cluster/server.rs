@@ -2,6 +2,7 @@ use std::sync::mpsc::{self, Sender, Receiver};
 use std::collections::{HashMap, HashSet};
 use std::net::{TcpListener, TcpStream};
 use std::fmt::Debug;
+use std::time::Duration;
 use libc::EINPROGRESS;
 use net2::{TcpBuilder, TcpStreamExt};
 use serde::{Serialize, Deserialize};
@@ -11,25 +12,27 @@ use amy::{Registrar, Notification, Event, FrameReader, FrameWriter};
 use members::Members;
 use node_id::NodeId;
 use executor::ExecutorMsg;
-use timer_wheel::TimerWheel;
+use ferris::{Wheel, CopyWheel, Resolution};
 use envelope::Envelope;
 use orset::{ORSet, Delta};
 use pid::Pid;
+use msg::Msg;
 use errors::*;
 use futures::sync::oneshot;
+use terminal::TimerId;
 use super::{ClusterStatus, ClusterMsg, ExternalMsg, ClusterMetrics};
 
 // TODO: This is totally arbitrary right now and should probably be user configurable
-const MAX_FRAME_SIZE: u32 = 100*1024*1024; // 100 MB
-const TICK_TIME: usize = 1000; // milliseconds
-const REQUEST_TIMEOUT: usize = 5000; // milliseconds
+const MAX_FRAME_SIZE: u32 = 10*1024*1024; // 10 MB
+
+const TICK_TIME: usize = 100; // milliseconds  - This must match the highest resolution of the timer wheels
+const REQUEST_TIMEOUT: u64 = 5; // seconds
 
 struct Conn {
     sock: TcpStream,
     node: Option<NodeId>,
     is_client: bool,
     members_sent: bool,
-    timer_wheel_index: usize,
     reader: FrameReader,
     writer: FrameWriter
 }
@@ -41,7 +44,6 @@ impl Conn {
             node: node,
             is_client: is_client,
             members_sent: false,
-            timer_wheel_index: 0, // Initialize with a fake value
             reader: FrameReader::new(MAX_FRAME_SIZE),
             writer: FrameWriter::new(),
         }
@@ -56,7 +58,8 @@ pub struct ClusterServer<T> {
     rx: Receiver<ClusterMsg<T>>,
     executor_tx: Sender<ExecutorMsg<T>>,
     timer_id: usize,
-    timer_wheel: TimerWheel<usize>,
+    timer_wheel: CopyWheel<usize>,
+    process_timer_wheel: CopyWheel<(Pid, TimerId)>,
     listener: TcpListener,
     listener_id: usize,
     members: Members,
@@ -86,7 +89,11 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
             rx: rx,
             executor_tx: executor_tx,
             timer_id: 0,
-            timer_wheel: TimerWheel::new(REQUEST_TIMEOUT / TICK_TIME),
+            timer_wheel: CopyWheel::new(vec![Resolution::HundredMs, Resolution::Sec]),
+            process_timer_wheel: CopyWheel::new(vec![Resolution::HundredMs,
+                                                      Resolution::Sec,
+                                                      Resolution::Min,
+                                                      Resolution::Hour]),
             listener: listener,
             listener_id: 0,
             members: Members::new(node),
@@ -148,7 +155,15 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
                 self.metrics.status_requests += 1;
                 self.get_status(tx)
             },
-            ClusterMsg::Shutdown => Err(ErrorKind::Shutdown(self.pid.clone()).into())
+            ClusterMsg::Shutdown => Err(ErrorKind::Shutdown(self.pid.clone()).into()),
+            ClusterMsg::StartTimer(pid, id, timeout) => {
+                self.process_timer_wheel.start((pid, id), timeout);
+                Ok(())
+            }
+            ClusterMsg::CancelTimer(pid, id) => {
+                self.process_timer_wheel.stop((pid, id));
+                Ok(())
+            }
         }
     }
 
@@ -185,6 +200,10 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
             };
 
             if let Err(e) = result {
+                if let ErrorKind::SendError(..) = *e.kind() {
+                    // We failed to send to the executor, which is fatal
+                    return Err(e);
+                }
                 errors.push(e);
             }
         }
@@ -286,10 +305,8 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
     }
 
     fn reset_timer(&mut self, id: usize) {
-        if let Some(conn) = self.connections.get_mut(&id) {
-            self.timer_wheel.remove(&id, conn.timer_wheel_index);
-            conn.timer_wheel_index = self.timer_wheel.insert(id)
-        }
+        self.timer_wheel.stop(id);
+        self.timer_wheel.start(id, Duration::from_secs(REQUEST_TIMEOUT));
     }
 
     /// Transition a connection from unestablished to established. If there is already an
@@ -310,8 +327,8 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
         if let Some(conn) = self.connections.get_mut(&id) {
             info!(self.logger, "Establish connection"; "peer" => from.to_string(), "id" => id);
             conn.node = Some(from.clone());
-            self.timer_wheel.remove(&id, conn.timer_wheel_index);
-            conn.timer_wheel_index = self.timer_wheel.insert(id);
+            self.timer_wheel.stop(id);
+            self.timer_wheel.start(id, Duration::from_secs(REQUEST_TIMEOUT));
             self.established.insert(from, id);
         }
     }
@@ -397,8 +414,8 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
         debug!(self.logger, "init_connection()";
                "id" => id, "is_client" => node.is_some(), "peer" => format!("{:?}", node));
         let is_client = node.is_some();
-        let mut conn = Conn::new(sock, node, is_client);
-        conn.timer_wheel_index = self.timer_wheel.insert(id);
+        let conn = Conn::new(sock, node, is_client);
+        self.timer_wheel.start(id, Duration::from_secs(REQUEST_TIMEOUT));
         self.connections.insert(id, conn);
         Ok(id)
     }
@@ -420,6 +437,19 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
         self.deregister(expired);
         try!(self.broadcast_pings());
         self.check_connections();
+        self.expire_process_timer()
+    }
+
+    fn expire_process_timer(&mut self) -> Result<()> {
+        for (pid, id) in self.process_timer_wheel.expire().into_iter() {
+            let e = Envelope::new(pid, self.pid.clone(), Msg::Timeout(id));
+            if let Err(mpsc::SendError(ExecutorMsg::Envelope(e)))
+                = self.executor_tx.send(ExecutorMsg::Envelope(e))
+                {
+                    return Err(ErrorKind::SendError("ExecutorMsg::Enelope".to_string(),
+                                                    Some(e.to)).into());
+                }
+        }
         Ok(())
     }
 
@@ -432,7 +462,7 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
         Ok(encoded)
     }
 
-    fn deregister(&mut self, expired: HashSet<usize>) {
+    fn deregister(&mut self, expired: Vec<usize>) {
         for id in expired.iter() {
             warn!(self.logger, "Connection timeout"; "id" => *id);
             self.close(*id);
@@ -443,7 +473,7 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
     fn close(&mut self, id: usize) {
         if let Some(conn) = self.connections.remove(&id) {
             let _ = self.registrar.deregister(conn.sock);
-            self.timer_wheel.remove(&id, conn.timer_wheel_index);
+            self.timer_wheel.stop(id);
             if let Some(node) = conn.node {
                 // Remove established connection if it matches this id
                 if let Some(established_id) = self.established.remove(&node) {
@@ -531,7 +561,7 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
     fn disconnect_all(&mut self) {
         self.established = HashMap::new();
         for (id, conn) in self.connections.drain() {
-            self.timer_wheel.remove(&id, conn.timer_wheel_index);
+            self.timer_wheel.stop(id);
             if let Err(e) = self.registrar.deregister(conn.sock) {
                 error!(self.logger, "Failed to deregister socket";
                        "id" => id, "peer" => format!("{:?}", conn.node),
@@ -544,7 +574,7 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
         for node in to_disconnect {
             if let Some(id) = self.established.remove(&node) {
                 let conn = self.connections.remove(&id).unwrap();
-                self.timer_wheel.remove(&id, conn.timer_wheel_index);
+                self.timer_wheel.stop(id);
                 if let Err(e) = self.registrar.deregister(conn.sock) {
                     error!(self.logger, "Failed to deregister socket";
                            "id" => id, "peer" => conn.node.unwrap().to_string(),

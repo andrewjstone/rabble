@@ -32,7 +32,7 @@ mod envelope;
 mod executor;
 mod cluster;
 mod msg;
-mod timer_wheel;
+mod terminal;
 
 pub mod histogram;
 pub mod channel;

@@ -23,7 +23,7 @@ slog = {version = "1", features = ["max_level_trace"]}
 slog-stdlog = "1"
 slog-term = "1.1"
 slog-envlogger = "0.5"
-ferris = "0.1"
+ferris = "0.2"
 serde = "1.0"
 serde_derive = "1.0"
 serde_bytes = "0.10"

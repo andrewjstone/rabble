@@ -1,5 +1,4 @@
 use serde::{Serialize, Deserialize};
-use std::mem;
 use std::fmt::Debug;
 use std::sync::mpsc::{Sender, Receiver};
 use std::collections::HashMap;
@@ -11,16 +10,14 @@ use pid::Pid;
 use process::Process;
 use node_id::NodeId;
 use cluster::ClusterMsg;
-use super::{ExecutorStatus, ExecutorMsg, ExecutorMetrics};
+use super::{ExecutorStatus, ExecutorMsg, ExecutorMetrics, ExecutorTerminal};
 use channel;
 
 pub struct Executor<T> {
-    pid: Pid,
     node: NodeId,
-    envelopes: Vec<Envelope<T>>,
     processes: HashMap<Pid, Box<Process<T>>>,
     service_senders: HashMap<Pid, Box<channel::Sender<Envelope<T>>>>,
-    tx: Sender<ExecutorMsg<T>>,
+    terminal: ExecutorTerminal<T>,
     rx: Receiver<ExecutorMsg<T>>,
     cluster_tx: Sender<ClusterMsg<T>>,
     logger: slog::Logger,
@@ -39,12 +36,12 @@ impl<'de, T: Serialize + Deserialize<'de> + Send + Debug + Clone> Executor<T> {
             node: node.clone()
         };
         Executor {
-            pid: pid,
             node: node,
-            envelopes: Vec::new(),
             processes: HashMap::new(),
             service_senders: HashMap::new(),
-            tx: tx,
+
+            // pid is just a placeholder pid, since we change it when we call a process
+            terminal: ExecutorTerminal::new(pid, tx, cluster_tx.clone()),
             rx: rx,
             cluster_tx: cluster_tx,
             logger: logger.new(o!("component" => "executor")),
@@ -89,11 +86,9 @@ impl<'de, T: Serialize + Deserialize<'de> + Send + Debug + Clone> Executor<T> {
     // Public only for benchmarking
     #[doc(hidden)]
     pub fn start(&mut self, pid: Pid, mut process: Box<Process<T>>) {
-        let envelopes = process.init(self.pid.clone());
+        self.terminal.set_pid(pid.clone());
+        process.init(&mut self.terminal);
         self.processes.insert(pid, process);
-        for envelope in envelopes {
-                self.route(envelope);
-        }
     }
 
     fn stop(&mut self, pid: Pid) {
@@ -133,23 +128,11 @@ impl<'de, T: Serialize + Deserialize<'de> + Send + Debug + Clone> Executor<T> {
 
         if let Some(process) = self.processes.get_mut(&envelope.to) {
             let Envelope {from, msg, ..} = envelope;
-            process.handle(msg, from, &mut self.envelopes);
+            process.handle(msg, from, &mut self.terminal);
         } else {
             return Err(envelope);
         };
 
-        // Take envelopes out of self temporarily so we don't get a borrowck error
-        let mut envelopes = mem::replace(&mut self.envelopes, Vec::new());
-        for envelope in envelopes.drain(..) {
-            if envelope.to.node == self.node {
-                // This won't ever fail because we hold a ref to both ends of the channel
-                self.tx.send(ExecutorMsg::Envelope(envelope)).unwrap();
-            } else {
-                self.cluster_tx.send(ClusterMsg::Envelope(envelope)).unwrap();
-            }
-        }
-        // Return the allocated vec back to self
-        let _ = mem::replace(&mut self.envelopes, envelopes);
         Ok(())
     }
 
