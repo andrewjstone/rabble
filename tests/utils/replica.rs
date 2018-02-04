@@ -26,7 +26,7 @@ impl Replica {
     }
 }
 
-impl<T> Process<TestMsg, T> for Replica where T: Terminal<TestMsg>{
+impl<T> Process<TestMsg, T> for Replica where T: Terminal<TestMsg> {
     fn handle(&mut self,
               msg: Msg<TestMsg>,
               from: Pid,
