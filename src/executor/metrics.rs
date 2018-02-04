@@ -4,7 +4,6 @@ use histogram::Histogram;
 pub struct ExecutorMetrics {
     pub received_envelopes: u64,
     pub route_envelope_ns: Histogram
-
 }
 
 impl ExecutorMetrics {

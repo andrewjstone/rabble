@@ -174,7 +174,7 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
             num_connections: self.connections.len(),
             metrics: self.metrics.clone()
         };
-        tx.send(status).map_err(|_| "Failed to send cluster status over oneshot".into())
+        tx.send(status).map_err(|_| "Failed to send cluster status".into())
     }
 
     fn send_remote(&mut self, envelope: Envelope<T>) -> Result<()> {

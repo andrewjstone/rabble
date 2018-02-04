@@ -91,8 +91,8 @@ fn cancelled_timer_does_not_fire() {
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 enum TestMsg {
-	StartTimer,
-	CancelTimer,
+    StartTimer,
+    CancelTimer,
     TimerFired
 }
 
@@ -105,21 +105,21 @@ impl<T> Process<TestMsg, T> for TestProcess where T: Terminal<TestMsg> {
     fn handle(&mut self,
               msg: Msg<TestMsg>,
               _: Pid,
-              terminal: &mut T) {
-
+              terminal: &mut T)
+    {
         match msg {
             Msg::Timeout(timer_id) => {
-				assert_eq!(timer_id, self.timer_id);
-				// Alert the test runner that the timeout was received
-				terminal.send(self.test_pid.clone(), TestMsg::TimerFired);
-			}
+                assert_eq!(timer_id, self.timer_id);
+                // Alert the test runner that the timeout was received
+                terminal.send(self.test_pid.clone(), TestMsg::TimerFired);
+            }
             Msg::User(TestMsg::StartTimer) => {
-				self.timer_id = terminal.start_timer(Duration::from_millis(100));
-			}
+                self.timer_id = terminal.start_timer(Duration::from_millis(100));
+            }
             Msg::User(TestMsg::CancelTimer) => {
                 terminal.cancel_timer(self.timer_id);
-			}
+            }
             _ => unreachable!()
-		}
+        }
     }
 }

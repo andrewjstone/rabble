@@ -126,7 +126,8 @@ impl<'de, T: Serialize + Deserialize<'de> + Send + Debug + Clone> Executor<T> {
         }
 
         if let Some(process) = self.processes.get_mut(&envelope.to) {
-            let Envelope {from, msg, ..} = envelope;
+            let Envelope {to, from, msg} = envelope;
+            self.terminal.set_pid(to);
             process.handle(msg, from, &mut self.terminal);
         } else {
             return Err(envelope);
