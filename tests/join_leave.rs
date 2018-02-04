@@ -13,10 +13,6 @@ extern crate slog_envlogger;
 extern crate slog_term;
 extern crate log;
 extern crate time;
-extern crate futures;
-
-use futures::sync::oneshot;
-use futures::Future;
 
 mod utils;
 
@@ -30,7 +26,8 @@ use utils::{
 
 use rabble::{
     ClusterStatus,
-    Node
+    Node,
+    channel
 };
 
 const NUM_NODES: usize = 3;
@@ -82,9 +79,10 @@ fn wait_for_cluster_status(node: &Node<TestMsg>,
 {
     let timeout = Duration::seconds(5);
     wait_for(timeout, || {
-        let (tx, rx) = oneshot::channel::<ClusterStatus>();
+        let (tx, rx) = std::sync::mpsc::channel::<ClusterStatus>();
+        let tx = Box::new(tx) as Box<channel::Sender<ClusterStatus>>;
         node.cluster_status(tx).unwrap();
-        if let Ok(ClusterStatus{established, num_connections, ..}) = rx.wait() {
+        if let Ok(ClusterStatus{established, num_connections, ..}) = rx.recv() {
             if established.len() == num_connected  && num_connections == num_connected {
                 return true;
             }

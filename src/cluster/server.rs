@@ -18,8 +18,8 @@ use orset::{ORSet, Delta};
 use pid::Pid;
 use msg::Msg;
 use errors::*;
-use futures::sync::oneshot;
 use terminal::TimerId;
+use channel;
 use super::{ClusterStatus, ClusterMsg, ExternalMsg, ClusterMetrics};
 
 // TODO: This is totally arbitrary right now and should probably be user configurable
@@ -167,7 +167,7 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
         }
     }
 
-    fn get_status(&self, tx: oneshot::Sender<ClusterStatus>) -> Result<()> {
+    fn get_status(&self, tx: Box<channel::Sender<ClusterStatus>>) -> Result<()> {
         let status = ClusterStatus {
             members: self.members.all(),
             established: self.established.keys().cloned().collect(),

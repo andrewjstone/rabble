@@ -3,7 +3,6 @@ use std::fmt::Debug;
 use std::sync::mpsc::{Sender, Receiver};
 use std::collections::HashMap;
 use std::time::Instant;
-use futures::sync::oneshot;
 use slog;
 use envelope::Envelope;
 use pid::Pid;
@@ -74,7 +73,7 @@ impl<'de, T: Serialize + Deserialize<'de> + Send + Debug + Clone> Executor<T> {
         }
     }
 
-    fn get_status(&self, tx: oneshot::Sender<ExecutorStatus>) {
+    fn get_status(&self, tx: Box<channel::Sender<ExecutorStatus>>) {
         let status = ExecutorStatus {
             total_processes: self.processes.len(),
             services: self.service_senders.keys().cloned().collect(),

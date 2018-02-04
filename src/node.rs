@@ -1,6 +1,5 @@
 use std::sync::mpsc::Sender;
 use std::fmt::Debug;
-use futures::sync::oneshot;
 use slog;
 use serde::{Serialize, Deserialize};
 use node_id::NodeId;
@@ -107,7 +106,7 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> Node<T> {
     }
 
     /// Get the status of the executor
-    pub fn executor_status(&self, reply_tx: oneshot::Sender<ExecutorStatus>) -> Result<()> {
+    pub fn executor_status(&self, reply_tx: Box<channel::Sender<ExecutorStatus>>) -> Result<()> {
         self.executor_tx.send(ExecutorMsg::GetStatus(reply_tx)).map_err(|_| {
             let errmsg = "ExecutorMsg::GetStatus".to_owned();
             ErrorKind::SendError(errmsg, None).into()
@@ -115,7 +114,7 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> Node<T> {
     }
 
     /// Get the status of the cluster server
-    pub fn cluster_status(&self, reply_tx: oneshot::Sender<ClusterStatus>) -> Result<()> {
+    pub fn cluster_status(&self, reply_tx: Box<channel::Sender<ClusterStatus>>) -> Result<()> {
         self.cluster_tx.send(ClusterMsg::GetStatus(reply_tx)).map_err(|_| {
             let errmsg = "ClusterMsg::GetStatus".to_owned();
             ErrorKind::SendError(errmsg, None).into()

@@ -4,9 +4,9 @@ use orset::{ORSet, Delta};
 use node_id::NodeId;
 use envelope::Envelope;
 use super::ClusterStatus;
-use futures::sync::oneshot::Sender;
 use terminal::TimerId;
 use pid::Pid;
+use channel::Sender;
 
 /// Messages sent to the Cluster Server
 pub enum ClusterMsg<T> {
@@ -14,7 +14,7 @@ pub enum ClusterMsg<T> {
     Join(NodeId),
     Leave(NodeId),
     Envelope(Envelope<T>),
-    GetStatus(Sender<ClusterStatus>),
+    GetStatus(Box<Sender<ClusterStatus>>),
     Shutdown,
 
     // Currently the executor uses the cluster server to manage timers

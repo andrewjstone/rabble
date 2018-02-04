@@ -10,14 +10,11 @@ extern crate slog_envlogger;
 extern crate slog_term;
 extern crate log;
 extern crate time;
-extern crate futures;
 
 mod utils;
 
 use std::sync::mpsc;
 use time::SteadyTime;
-use futures::Future;
-use futures::sync::oneshot;
 
 use utils::messages::*;
 use utils::replica::Replica;
@@ -89,9 +86,10 @@ fn wait_for_connected_cluster(nodes: &Vec<CrNode>) {
     while stable_count < nodes.len() {
         stable_count = 0;
         for node in nodes {
-            let (tx, rx) = oneshot::channel();
+            let (tx, rx) = mpsc::channel();
+            let tx = Box::new(tx) as Box<channel::Sender<ClusterStatus>>;
             node.cluster_status(tx).unwrap();
-            match rx.wait() {
+            match rx.recv() {
                 Ok(ClusterStatus{established, num_connections, ..}) => {
                     // Ensure that we are in a stable state. We have 2 established connections and no
                     // non-established connections that may cause established ones to disconnect.
