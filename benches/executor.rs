@@ -13,7 +13,7 @@ extern crate serde_derive;
 use criterion::Criterion;
 use slog::{Logger, DrainExt};
 use std::sync::mpsc::channel;
-use rabble::{Msg, Pid, NodeId, Envelope, Executor, Process};
+use rabble::{Msg, Pid, NodeId, Envelope, Executor, Process, Terminal};
 
 fn create_pid(c: &mut Criterion) {
     c.bench_function("create Pid", |b| b.iter(|| pid("counter1")));
@@ -78,11 +78,11 @@ impl Counter {
     }
 }
 
-impl Process<TestMsg> for Counter {
+impl<T> Process<TestMsg, T> for Counter where T: Terminal<TestMsg> {
     fn handle(&mut self,
               _msg: Msg<TestMsg>,
               _from: Pid,
-              output: &mut Vec<Envelope<TestMsg>>)
+              _terminal: &mut T)
     {
         self.count += 1;
     }

@@ -1,6 +1,6 @@
-use hdrsample;
-use hdrsample::serialization::Deserializer as hdrsampleDeserializer;
-use hdrsample::serialization::{V2Serializer, Serializer};
+use hdrhistogram;
+use hdrhistogram::serialization::Deserializer as hdrhistogramDeserializer;
+use hdrhistogram::serialization::{V2Serializer, Serializer};
 use serde::ser::{self, Serialize};
 use serde::de::{self, Deserialize, Deserializer};
 use serde_bytes::{Bytes, ByteBuf};
@@ -15,11 +15,11 @@ pub enum TimeUnit {
 
 /// A histogram that can be serialized via Serde
 #[derive(Debug, Clone, PartialEq)]
-pub struct Histogram(pub hdrsample::Histogram<u64>);
+pub struct Histogram(pub hdrhistogram::Histogram<u64>);
 
 impl Histogram {
     pub fn new() -> Histogram {
-        Histogram(hdrsample::Histogram::<u64>::new(3).unwrap())
+        Histogram(hdrhistogram::Histogram::<u64>::new(3).unwrap())
     }
 }
 
@@ -50,7 +50,7 @@ impl<'de> Deserialize<'de> for Histogram {
         where D: Deserializer<'de>
     {
         let buf = ByteBuf::deserialize(deserializer)?;
-        let histogram = hdrsampleDeserializer::new()
+        let histogram = hdrhistogramDeserializer::new()
             .deserialize(&mut &buf[..])
             .map_err(|e| de::Error::custom(format!("{:?}", e)))?;
         Ok(Histogram(histogram))

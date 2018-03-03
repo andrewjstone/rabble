@@ -10,7 +10,7 @@ extern crate time;
 extern crate net2;
 extern crate libc;
 extern crate ferris;
-extern crate hdrsample;
+extern crate hdrhistogram;
 extern crate futures;
 
 #[macro_use]
