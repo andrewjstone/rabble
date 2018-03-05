@@ -1,13 +1,12 @@
 use std::time::Duration;
-use std::sync::mpsc::Sender;
 use std::fmt::Debug;
+use std::vec::Drain;
 use pid::Pid;
 use msg::Msg;
 use envelope::Envelope;
 use terminal::{Terminal, TimerId};
-use cluster::ClusterMsg;
-use super::ExecutorMsg;
 use serde::{Serialize, Deserialize};
+use ferris::{Wheel, CopyWheel, Resolution};
 
 /// The implementation of a terminal for the Executor
 ///
@@ -17,29 +16,40 @@ pub struct ExecutorTerminal<T> {
     /// This process has a mutable ref to this terminal
     current_pid: Pid,
     timer_count: usize,
-    tx: Sender<ExecutorMsg<T>>,
-
-    /// All timers are maintained in the cluster server.
-    cluster_tx: Sender<ClusterMsg<T>>,
+    output: Vec<Envelope<T>>,
+    timers: CopyWheel<(Pid, TimerId)>,
 }
 
-impl<T> ExecutorTerminal<T> {
+impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone + 'static> ExecutorTerminal<T> {
     /// Create a new ExecutorTerminal
-    pub fn new(pid: Pid,
-           tx: Sender<ExecutorMsg<T>>,
-           cluster_tx: Sender<ClusterMsg<T>>) -> ExecutorTerminal<T>
+    pub fn new(pid: Pid) -> ExecutorTerminal<T>
     {
         ExecutorTerminal {
             current_pid: pid,
             timer_count: 0,
-            tx: tx,
-            cluster_tx: cluster_tx
+            output: Vec::new(),
+            timers: CopyWheel::new(vec![Resolution::HundredMs,
+                                        Resolution::Sec,
+                                        Resolution::Min,
+                                        Resolution::Hour]),
         }
     }
 
     /// Set the pid of the currently executing process
-   pub fn set_pid(&mut self, pid: Pid) {
+    pub fn set_pid(&mut self, pid: Pid) {
         self.current_pid = pid;
+    }
+
+    /// Check for expired timers and send timeout messages to processes
+    pub fn process_timeouts(&mut self) {
+        for (pid, id) in self.timers.expire().into_iter() {
+            self.output.push(Envelope::new(pid.clone(), pid, Msg::Timeout(id)));
+        }
+    }
+
+    /// Return all envelopes that need to be delivered to processes
+    pub fn pending(&mut self) -> Drain<Envelope<T>> {
+        self.output.drain(..)
     }
 
     /// Get the next TimerId
@@ -50,16 +60,13 @@ impl<T> ExecutorTerminal<T> {
 }
 
 impl<'de, T> Terminal<T> for ExecutorTerminal<T>
-    where T: Clone + Debug + Serialize + Deserialize<'de>
+    where T: Clone + Debug + Serialize + Deserialize<'de> + 'static
 {
     /// Send an envelope addressed to `to`, with message `Msg::User(msg)`
     ///
     /// The `from` field of the envelope is filled in with self.current_pid
-    fn send(&self, to: Pid, msg: T) where T: Clone{
-        let envelope = Envelope::new(to, self.current_pid.clone(), Msg::User(msg));
-
-        // This can never fail since the caller holds a ref to the other side of the channel
-        self.tx.send(ExecutorMsg::Envelope(envelope)).unwrap();
+    fn send(&mut self, to: Pid, msg: T) where T: Clone{
+        self.output.push(Envelope::new(to, self.current_pid.clone(), Msg::User(msg)));
     }
 
     /// Start a timer
@@ -67,10 +74,7 @@ impl<'de, T> Terminal<T> for ExecutorTerminal<T>
     /// A Msg::Timeout(TimerId) will get routed to the process when it expires after `timeout`.
     fn start_timer(&mut self, timeout: Duration) -> TimerId {
         let id = self.timer_id();
-        let msg = ClusterMsg::StartTimer(self.current_pid.clone(), id, timeout);
-
-        // Ignore any errors as it means we are shutting down.
-        let _ = self.cluster_tx.send(msg);
+        self.timers.start((self.current_pid.clone(), id), timeout);
         id
     }
 
@@ -78,9 +82,6 @@ impl<'de, T> Terminal<T> for ExecutorTerminal<T>
     ///
     /// A user will never receive a timeout for a cancelled TimerId
     fn cancel_timer(&mut self, id: TimerId) {
-        let msg = ClusterMsg::CancelTimer(self.current_pid.clone(), id);
-
-        // Ignore any errors as it means we are shutting down.
-        let _ = self.cluster_tx.send(msg);
+        self.timers.stop((self.current_pid.clone(), id));
     }
 }

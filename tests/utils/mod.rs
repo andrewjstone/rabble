@@ -58,9 +58,9 @@ pub fn start_nodes(n: usize) -> (Vec<Node<TestMsg>>, Vec<JoinHandle<()>>) {
     slog_stdlog::set_logger(root_logger.clone()).unwrap();
     create_node_ids(n).into_iter().fold((Vec::new(), Vec::new()),
                                   |(mut nodes, mut handles), node_id| {
-        let (node, handle_list) = rabble::rouse(node_id, Some(root_logger.clone()));
+        let (node, handle) = rabble::rouse(node_id, Some(root_logger.clone()));
         nodes.push(node);
-        handles.extend(handle_list);
+        handles.push(handle);
         (nodes, handles)
     })
 }

@@ -1,4 +1,3 @@
-use std::sync::mpsc::{self, Sender, Receiver};
 use std::collections::{HashMap, HashSet};
 use std::net::{TcpListener, TcpStream};
 use std::fmt::Debug;
@@ -8,17 +7,15 @@ use net2::{TcpBuilder, TcpStreamExt};
 use serde::{Serialize, Deserialize};
 use msgpack::{Serializer, Deserializer};
 use slog;
-use amy::{Registrar, Notification, Event, FrameReader, FrameWriter};
+use amy::{Poller, Registrar, Notification, Event, FrameReader, FrameWriter, Sender, Receiver};
 use members::Members;
 use node_id::NodeId;
-use executor::ExecutorMsg;
+use executor::Executor;
 use ferris::{Wheel, CopyWheel, Resolution};
 use envelope::Envelope;
 use orset::{ORSet, Delta};
 use pid::Pid;
-use msg::Msg;
 use errors::*;
-use terminal::TimerId;
 use channel;
 use super::{ClusterStatus, ClusterMsg, ExternalMsg, ClusterMetrics};
 
@@ -27,6 +24,7 @@ const MAX_FRAME_SIZE: u32 = 10*1024*1024; // 10 MB
 
 const TICK_TIME: usize = 100; // milliseconds  - This must match the highest resolution of the timer wheels
 const REQUEST_TIMEOUT: u64 = 5; // seconds
+const POLL_TIMEOUT: usize = 5000; // ms
 
 struct Conn {
     sock: TcpStream,
@@ -55,50 +53,48 @@ impl Conn {
 pub struct ClusterServer<T> {
     pid: Pid,
     node: NodeId,
+    executor: Executor<T>,
+    tx: Sender<ClusterMsg<T>>,
     rx: Receiver<ClusterMsg<T>>,
-    executor_tx: Sender<ExecutorMsg<T>>,
     timer_id: usize,
     timer_wheel: CopyWheel<usize>,
-    process_timer_wheel: CopyWheel<(Pid, TimerId)>,
     listener: TcpListener,
     listener_id: usize,
     members: Members,
     connections: HashMap<usize, Conn>,
     established: HashMap<NodeId, usize>,
+    poller: Poller,
     registrar: Registrar,
     logger: slog::Logger,
     metrics: ClusterMetrics
 }
 
-impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
-    pub fn new(node: NodeId,
-               rx: Receiver<ClusterMsg<T>>,
-               executor_tx: Sender<ExecutorMsg<T>>,
-               registrar: Registrar,
-               logger: slog::Logger) -> ClusterServer<T> {
+impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone + Send + 'static> ClusterServer<T> {
+    pub fn new(node: NodeId, logger: slog::Logger) -> ClusterServer<T> {
         let pid = Pid {
             group: Some("rabble".to_string()),
             name: "cluster_server".to_string(),
             node: node.clone()
         };
+        let poller = Poller::new().unwrap();
+        let mut registrar = poller.get_registrar();
+        let (tx, rx) = registrar.channel().unwrap();
         let listener = TcpListener::bind(&node.addr[..]).unwrap();
         listener.set_nonblocking(true).unwrap();
         ClusterServer {
             pid: pid,
             node: node.clone(),
+            executor: Executor::new(node.clone(), logger.new(o!("component" => "executor"))),
+            tx: tx,
             rx: rx,
-            executor_tx: executor_tx,
             timer_id: 0,
             timer_wheel: CopyWheel::new(vec![Resolution::HundredMs, Resolution::Sec]),
-            process_timer_wheel: CopyWheel::new(vec![Resolution::HundredMs,
-                                                      Resolution::Sec,
-                                                      Resolution::Min,
-                                                      Resolution::Hour]),
             listener: listener,
             listener_id: 0,
             members: Members::new(node),
             connections: HashMap::new(),
             established: HashMap::new(),
+            poller: poller,
             registrar: registrar,
             logger: logger.new(o!("component" => "cluster_server")),
             metrics: ClusterMetrics::new()
@@ -109,62 +105,72 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
         info!(self.logger, "Starting");
         self.timer_id = self.registrar.set_interval(TICK_TIME).unwrap();
         self.listener_id = self.registrar.register(&self.listener, Event::Read).unwrap();
-        while let Ok(msg) = self.rx.recv() {
-            if let Err(e) = self.handle_cluster_msg(msg) {
-                self.metrics.errors += 1;
+        loop {
+            let notifications = self.poller.wait(POLL_TIMEOUT).unwrap();
+            self.metrics.poll_notifications += notifications.len() as u64;
+            if let Err(e) = self.handle_poll_notifications(notifications) {
                 for id in e.kind().get_ids() {
                     self.close(id)
                 }
                 match *e.kind() {
-                    ErrorKind::EncodeError(..) | ErrorKind::DecodeError(..) |
-                    ErrorKind::RegistrarError(..) | ErrorKind::SendError(..) => {
-                        error!(self.logger, e.to_string());
-                        break;
-                    }
-
                     ErrorKind::Shutdown(..) => {
                         info!(self.logger, e.to_string());
                         break;
                     },
-
-                    _ => warn!(self.logger, e.to_string())
+                    _ => error!(self.logger, e.to_string())
                 }
             }
         }
     }
 
-    fn handle_cluster_msg(&mut self, msg: ClusterMsg<T>) -> Result<()> {
-        match msg {
-            ClusterMsg::PollNotifications(notifications) => {
-                self.metrics.poll_notifications += 1;
-                self.handle_poll_notifications(notifications)
-            },
-            ClusterMsg::Join(node) => {
-                self.metrics.joins += 1;
-                self.join(node)
-            },
-            ClusterMsg::Leave(node) => {
-                self.metrics.leaves += 1;
-                self.leave(node)
-            },
-            ClusterMsg::Envelope(envelope) => {
-                self.metrics.received_local_envelopes += 1;
-                self.send_remote(envelope)
-            },
-            ClusterMsg::GetStatus(tx) => {
-                self.metrics.status_requests += 1;
-                self.get_status(tx)
-            },
-            ClusterMsg::Shutdown => Err(ErrorKind::Shutdown(self.pid.clone()).into()),
-            ClusterMsg::StartTimer(pid, id, timeout) => {
-                self.process_timer_wheel.start((pid, id), timeout);
-                Ok(())
-            }
-            ClusterMsg::CancelTimer(pid, id) => {
-                self.process_timer_wheel.stop((pid, id));
-                Ok(())
+    pub fn sender(&self) -> Sender<ClusterMsg<T>> {
+        self.tx.clone()
+    }
+
+    fn receive_msgs(&mut self) -> Result<()> {
+        while let Ok(msg) = self.rx.try_recv() {
+            if let Err(e) = self.handle_cluster_msg(msg) {
+                if let ErrorKind::Shutdown(..) = *e.kind() {
+                    return Err(e);
+                }
+                error!(self.logger, e.to_string());
             }
         }
+        Ok(())
+    }
+
+    fn handle_cluster_msg(&mut self, msg: ClusterMsg<T>) -> Result<()> {
+        match msg {
+            ClusterMsg::Join(node) => {
+                self.metrics.joins += 1;
+                self.join(node)?;
+            }
+            ClusterMsg::Leave(node) => {
+                self.metrics.leaves += 1;
+                self.leave(node)?;
+            }
+            ClusterMsg::Envelope(envelope) => {
+                self.metrics.received_local_envelopes += 1;
+                self.executor.send(envelope);
+            }
+            ClusterMsg::GetStatus(tx) => {
+                self.metrics.status_requests += 1;
+                self.get_status(tx)?;
+            }
+            ClusterMsg::Spawn(pid, process) => {
+                self.executor.spawn(pid, process);
+            }
+            ClusterMsg::Stop(pid) => {
+                self.executor.stop(pid);
+            }
+            ClusterMsg::RegisterService(pid, sender) => {
+                self.executor.register_service(pid, sender);
+            }
+            ClusterMsg::Shutdown => {
+                return Err(ErrorKind::Shutdown(self.pid.clone()).into());
+            }
+        }
+        Ok(())
     }
 
     fn get_status(&self, tx: Box<channel::Sender<ClusterStatus>>) -> Result<()> {
@@ -172,7 +178,8 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
             members: self.members.all(),
             established: self.established.keys().cloned().collect(),
             num_connections: self.connections.len(),
-            metrics: self.metrics.clone()
+            metrics: self.metrics.clone(),
+            executor: self.executor.get_status()
         };
         tx.send(status).map_err(|_| "Failed to send cluster status".into())
     }
@@ -196,18 +203,29 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
             let result = match n.id {
                 id if id == self.listener_id => self.accept_connection(),
                 id if id == self.timer_id => self.tick(),
+                id if id == self.rx.get_id() => self.receive_msgs(),
                 _ => self.do_socket_io(n)
             };
 
             if let Err(e) = result {
-                if let ErrorKind::SendError(..) = *e.kind() {
-                    // We failed to send to the executor, which is fatal
+                if let ErrorKind::Shutdown(..) = *e.kind() {
                     return Err(e);
                 }
                 errors.push(e);
             }
+
+            // We need to collect the envelopes due to borrow checker rules. NLL should fix this
+            // eventually.
+            let envelopes: Vec<_> = self.executor.remote_envelopes().collect();
+
+            for envelope in envelopes {
+                if let Err(e) = self.send_remote(envelope) {
+                    errors.push(e);
+                }
+            }
         }
         if errors.len() != 0 {
+            self.metrics.errors += errors.len() as u64;
             return Err(ErrorKind::PollNotificationErrors(errors).into());
         }
         Ok(())
@@ -265,12 +283,7 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
                 debug!(self.logger, "Got User Message";
                        "from" => envelope.from.to_string(),
                        "to" => envelope.to.to_string());
-                if let Err(mpsc::SendError(ExecutorMsg::Envelope(envelope)))
-                    = self.executor_tx.send(ExecutorMsg::Envelope(envelope))
-                {
-                    return Err(ErrorKind::SendError("ExecutorMsg::Enelope".to_string(),
-                                                    Some(envelope.to)).into());
-                }
+                self.executor.send(envelope);
             },
             ExternalMsg::Delta(delta) => {
                 debug!(self.logger, "Got Delta mutator";
@@ -437,19 +450,7 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
         self.deregister(expired);
         try!(self.broadcast_pings());
         self.check_connections();
-        self.expire_process_timer()
-    }
-
-    fn expire_process_timer(&mut self) -> Result<()> {
-        for (pid, id) in self.process_timer_wheel.expire().into_iter() {
-            let e = Envelope::new(pid, self.pid.clone(), Msg::Timeout(id));
-            if let Err(mpsc::SendError(ExecutorMsg::Envelope(e)))
-                = self.executor_tx.send(ExecutorMsg::Envelope(e))
-                {
-                    return Err(ErrorKind::SendError("ExecutorMsg::Enelope".to_string(),
-                                                    Some(e.to)).into());
-                }
-        }
+        self.executor.process_timeouts();
         Ok(())
     }
 
@@ -472,7 +473,7 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
     /// Close an existing connection and remove all related state.
     fn close(&mut self, id: usize) {
         if let Some(conn) = self.connections.remove(&id) {
-            let _ = self.registrar.deregister(conn.sock);
+            let _ = self.registrar.deregister(&conn.sock);
             self.timer_wheel.stop(id);
             if let Some(node) = conn.node {
                 // Remove established connection if it matches this id
@@ -562,7 +563,7 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
         self.established = HashMap::new();
         for (id, conn) in self.connections.drain() {
             self.timer_wheel.stop(id);
-            if let Err(e) = self.registrar.deregister(conn.sock) {
+            if let Err(e) = self.registrar.deregister(&conn.sock) {
                 error!(self.logger, "Failed to deregister socket";
                        "id" => id, "peer" => format!("{:?}", conn.node),
                        "error" => e.to_string());
@@ -575,7 +576,7 @@ impl<'de, T: Serialize + Deserialize<'de> + Debug + Clone> ClusterServer<T> {
             if let Some(id) = self.established.remove(&node) {
                 let conn = self.connections.remove(&id).unwrap();
                 self.timer_wheel.stop(id);
-                if let Err(e) = self.registrar.deregister(conn.sock) {
+                if let Err(e) = self.registrar.deregister(&conn.sock) {
                     error!(self.logger, "Failed to deregister socket";
                            "id" => id, "peer" => conn.node.unwrap().to_string(),
                            "error" => e.to_string());

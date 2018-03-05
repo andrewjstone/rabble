@@ -15,7 +15,7 @@ impl TimerId {
 ///
 /// It uses it to both send messages and manage timers.
 pub trait Terminal<T> {
-    fn send(&self, to: Pid, msg: T);
+    fn send(&mut self, to: Pid, msg: T);
     fn start_timer(&mut self, Duration) -> TimerId;
     fn cancel_timer(&mut self, TimerId);
 }

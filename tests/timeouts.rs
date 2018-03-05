@@ -24,10 +24,10 @@ fn setup(addr: &str) -> (Node<TestMsg>,
                          Pid,
                          Pid,
                          mpsc::Receiver<Envelope<TestMsg>>,
-                         Vec<JoinHandle<()>>)
+                         JoinHandle<()>)
 {
     let node_id = NodeId {name: "node1".to_string(), addr: addr.to_string()};
-    let (node, handles) = rabble::rouse::<TestMsg>(node_id.clone(), None);
+    let (node, handle) = rabble::rouse::<TestMsg>(node_id.clone(), None);
 
     let pid = Pid {
         name: "some-process".to_string(),
@@ -49,12 +49,12 @@ fn setup(addr: &str) -> (Node<TestMsg>,
     node.register_service(&test_pid,
                           Box::new(tx) as Box<channel::Sender<Envelope<TestMsg>>>).unwrap();
 
-    (node, pid, test_pid, rx, handles)
+    (node, pid, test_pid, rx, handle)
 }
 
 #[test]
 fn timer_fires() {
-    let (node, pid, test_pid, rx, handles) = setup("127.0.0.1:11003");
+    let (node, pid, test_pid, rx, handle) = setup("127.0.0.1:11003");
     node.send(Envelope::new(pid.clone(), test_pid.clone(), Msg::User(TestMsg::StartTimer))).unwrap();
 
     // Wait for the process to get the timeout. Wait 3x as long as the actual timeout.
@@ -65,14 +65,12 @@ fn timer_fires() {
     assert_eq!(envelope.to, test_pid);
 
     node.shutdown();
-    for h in handles {
-        h.join().unwrap();
-    }
+    handle.join().unwrap();
 }
 
 #[test]
 fn cancelled_timer_does_not_fire() {
-    let (node, pid, test_pid, rx, handles) = setup("127.0.0.1:11004");
+    let (node, pid, test_pid, rx, handle) = setup("127.0.0.1:11004");
     node.send(Envelope::new(pid.clone(), test_pid.clone(), Msg::User(TestMsg::StartTimer))).unwrap();
     node.send(Envelope::new(pid.clone(), test_pid.clone(), Msg::User(TestMsg::CancelTimer))).unwrap();
 
@@ -83,9 +81,7 @@ fn cancelled_timer_does_not_fire() {
     }
 
     node.shutdown();
-    for h in handles {
-        h.join().unwrap();
-    }
+    handle.join().unwrap();
 }
 
 
